@@ -6,17 +6,12 @@ fn File! open(String filename, String mode)
 	return { .file = os::native_fopen(filename, mode) };
 }
 
-fn void! File.open(File* file, String filename, String mode) @deprecated
-{
-	file.file = os::native_fopen(filename, mode)?;
-}
-
 /**
  * @require file.file != null
  **/
 fn void! File.reopen(File* file, String filename, String mode)
 {
-	file.file = os::native_freopen(file.file, filename, mode)?;
+	file.file = os::native_freopen(file.file, filename, mode)!;
 }
 
 /**
@@ -24,7 +19,7 @@ fn void! File.reopen(File* file, String filename, String mode)
  **/
 fn usz! File.seek(File file, isz offset, Seek seek_mode = Seek.SET)
 {
-	os::native_fseek(file.file, offset, seek_mode)?;
+	os::native_fseek(file.file, offset, seek_mode)!;
 	return os::native_ftell(file.file);
 }
 
@@ -50,7 +45,7 @@ fn void! File.memopen(File* file, char[] data, String mode)
  */
 fn void! File.putc(File *file, char c)
 {
-    if (!libc::fputc(c, file.file)) return IoError.FILE_EOF!;
+    if (!libc::fputc(c, file.file)) return IoError.FILE_EOF?;
 }
 
 /**
@@ -63,8 +58,8 @@ fn void! File.close(File *file) @inline
         switch (libc::errno())
         {
             case errno::ECONNRESET:
-            case errno::EBADF: return IoError.FILE_NOT_VALID!;
-            case errno::EINTR: return IoError.INTERRUPTED!;
+            case errno::EBADF: return IoError.FILE_NOT_VALID?;
+            case errno::EINTR: return IoError.INTERRUPTED?;
             case errno::EDQUOT:
             case errno::EFAULT:
             case errno::EAGAIN:
@@ -72,8 +67,8 @@ fn void! File.close(File *file) @inline
             case errno::ENETDOWN:
             case errno::ENETUNREACH:
             case errno::ENOSPC:
-            case errno::EIO: return IoError.INCOMPLETE_WRITE!;
-            default: return IoError.UNKNOWN_ERROR!;
+            case errno::EIO: return IoError.INCOMPLETE_WRITE?;
+            default: return IoError.UNKNOWN_ERROR?;
         }
     }
     file.file = null;
@@ -111,8 +106,8 @@ fn usz! File.write(File file, char[] buffer)
  */
 fn usz! File.printn(File file, String string)
 {
-	usz len = file.print(string)?;
-	if (!libc::putc('\n', file.file)) return IoError.UNKNOWN_ERROR!;
+	usz len = file.print(string)!;
+	if (!libc::putc('\n', file.file)) return IoError.UNKNOWN_ERROR?;
     return len + 1;
 }
 
@@ -123,11 +118,9 @@ fn usz! File.printn(File file, String string)
 fn usz! File.print(File file, String string)
 {
     usz len = string.len;
-    if (len != file.write((char[])string)?) return IoError.UNKNOWN_ERROR!;
+    if (len != file.write((char[])string)!) return IoError.UNKNOWN_ERROR?;
     return len;
 }
-
-fn usz! File.println(File file, String string) @deprecated => file.printn(string);
 
 /**
  * @param [&in] file
@@ -159,7 +152,7 @@ fn String File.tgetline(File* file)
 fn char! File.getc(File* file)
 {
 	int c = libc::fgetc(file.file);
-	if (c == -1) return IoError.FILE_EOF!;
+	if (c == -1) return IoError.FILE_EOF?;
 	return (char)c;
 }
 

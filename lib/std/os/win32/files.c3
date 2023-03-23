@@ -1,4 +1,4 @@
-module std::os::win32::files;
+module std::os::win32;
 
 $if (env::os_is_win32())
 
@@ -30,6 +30,11 @@ extern fn Win32_BOOL win32_GetFileAttributesExW(Win32_LPCWSTR, Win32_GET_FILEEX_
 extern fn Win32_BOOL win32_PathFileExistsW(Win32_LPCWSTR) @extern("PathFileExistsW");
 extern fn Win32_DWORD win32_GetTempPathW(Win32_DWORD nBufferLength, Win32_LPWSTR lpBuffer) @extern("GetTempPathW");
 extern fn Win32_BOOL win32_SetCurrentDirectoryW(Win32_LPCTSTR buffer) @extern("SetCurrentDirectoryW");
+extern fn Win32_BOOL win32_RemoveDirectoryW(Win32_LPCWSTR lpPathName) @extern("RemoveDirectoryW");
+extern fn Win32_BOOL win32_CreateDirectoryW(Win32_LPCWSTR lpPathName, Win32_LPSECURITY_ATTRIBUTES lpPipeAttributes) @extern("CreateDirectoryW");
+
+extern fn Char16* _wgetcwd(Char16* buffer, int maxlen);
+extern fn usz wcslen(Char16* str);
 
 /*
 extern ulong _win32_GetCurrentDirectoryW(ulong, Char16* buffer) @extern("GetCurrentDirectoryW");

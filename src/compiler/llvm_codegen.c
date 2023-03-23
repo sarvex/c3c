@@ -8,7 +8,7 @@
 #include <llvm-c/Error.h>
 #include <llvm-c/Comdat.h>
 #include <llvm-c/Linker.h>
-#include <setjmp.h>
+
 typedef struct LLVMOpaquePassBuilderOptions *LLVMPassBuilderOptionsRef;
 LLVMErrorRef LLVMRunPasses(LLVMModuleRef M, const char *Passes,
                            LLVMTargetMachineRef TM,
@@ -89,8 +89,8 @@ static void gencontext_destroy(GenContext *context)
 LLVMValueRef llvm_emit_is_no_opt(GenContext *c, LLVMValueRef error_value)
 {
 	LLVMValueRef compare = LLVMBuildICmp(c->builder, LLVMIntEQ, error_value, llvm_get_zero(c, type_anyerr), "not_err");
-	LLVMValueRef vals[2] = { compare, LLVMConstInt(c->bool_type, 1, false) };
-	return llvm_emit_call_intrinsic(c, intrinsic_id.expect, &c->bool_type, 1, vals, 2);
+	LLVMValueRef values[2] = { compare, LLVMConstInt(c->bool_type, 1, false) };
+	return llvm_emit_call_intrinsic(c, intrinsic_id.expect, &c->bool_type, 1, values, 2);
 }
 
 LLVMValueRef llvm_emit_memclear_size_align(GenContext *c, LLVMValueRef ptr, uint64_t size, AlignSize align)
@@ -592,28 +592,6 @@ void llvm_emit_local_var_alloca(GenContext *c, Decl *decl)
 	}
 }
 
-/**
- * Values here taken from LLVM.
- * @return return the inlining threshold given the build options.
- */
-static int get_inlining_threshold()
-{
-	if (active_target.optimization_level == OPTIMIZATION_AGGRESSIVE)
-	{
-		return 250;
-	}
-	switch (active_target.size_optimization_level)
-	{
-		case SIZE_OPTIMIZATION_TINY:
-			return 5;
-		case SIZE_OPTIMIZATION_SMALL:
-			return 50;
-		default:
-			return 250;
-	}
-}
-
-
 static inline unsigned lookup_intrinsic(const char *name)
 {
 	return LLVMLookupIntrinsicID(name, strlen(name));
@@ -635,7 +613,6 @@ static void llvm_codegen_setup()
 	intrinsic_id.abs = lookup_intrinsic("llvm.abs");
 	intrinsic_id.assume = lookup_intrinsic("llvm.assume");
 	intrinsic_id.bitreverse = lookup_intrinsic("llvm.bitreverse");
-	intrinsic_id.bswap = lookup_intrinsic("llvm.bswap");
 	intrinsic_id.bswap = lookup_intrinsic("llvm.bswap");
 	intrinsic_id.ceil = lookup_intrinsic("llvm.ceil");
 	intrinsic_id.convert_from_fp16 = lookup_intrinsic("llvm.convert.from.fp16");
@@ -914,7 +891,7 @@ void llvm_add_global_decl(GenContext *c, Decl *decl)
 	assert(decl->var.kind == VARDECL_GLOBAL || decl->var.kind == VARDECL_CONST);
 
 	bool same_module = decl->unit->module == c->code_module;
-	const char *name = same_module ? "tempglobal" : decl_get_extname(decl);
+	const char *name = same_module ? "temp_global" : decl_get_extname(decl);
 	decl->backend_ref = llvm_add_global(c, name, decl->type, decl->alignment);
 	llvm_set_alignment(decl->backend_ref, decl->alignment);
 	if (!same_module)

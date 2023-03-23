@@ -48,10 +48,13 @@ fn TestRunner test_runner_create()
 import libc;
 
 TestRunner* current_runner @private;
-fn void test_panic(String message, String file, String function, uint line)
+
+fn void test_panic(String message, String file, String function, uint line, variant[] args)
 {
 	io::printn("[error]");
-	io::printfn("\n Error: %s", message);
+	io::print("\n Error: ");
+	io::printf(message, ...args);
+	io::printn();
 	io::printfn("  - in %s %s:%s.\n", function, file, line);
 	libc::longjmp(&current_runner.buf, 1);
 }

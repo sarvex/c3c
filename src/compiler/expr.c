@@ -131,8 +131,8 @@ bool expr_may_addr(Expr *expr)
 		case EXPR_TYPEID:
 		case EXPR_TYPEID_INFO:
 		case EXPR_TYPEINFO:
-		case EXPR_VARIANT:
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANY:
+		case EXPR_ANYSWITCH:
 		case EXPR_VASPLAT:
 		case EXPR_SWIZZLE:
 		case EXPR_LAMBDA:
@@ -174,7 +174,7 @@ bool expr_is_constant_eval(Expr *expr, ConstantEvalKind eval_kind)
 		case EXPR_ACCESS:
 			expr = expr->access_expr.parent;
 			goto RETRY;
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANYSWITCH:
 			return false;
 		case EXPR_BITASSIGN:
 			return false;
@@ -192,8 +192,8 @@ bool expr_is_constant_eval(Expr *expr, ConstantEvalKind eval_kind)
 					break;
 			}
 			return exprid_is_constant_eval(expr->builtin_access_expr.inner, eval_kind);
-		case EXPR_VARIANT:
-			return exprid_is_constant_eval(expr->variant_expr.type_id, eval_kind) && exprid_is_constant_eval(expr->variant_expr.ptr, eval_kind);
+		case EXPR_ANY:
+			return exprid_is_constant_eval(expr->any_expr.type_id, eval_kind) && exprid_is_constant_eval(expr->any_expr.ptr, eval_kind);
 		case EXPR_BINARY:
 			return expr_binary_is_constant_eval(expr, eval_kind);
 		case EXPR_CAST:
@@ -554,6 +554,7 @@ void expr_rewrite_to_const_zero(Expr *expr, Type *type)
 		case TYPE_POISONED:
 		case TYPE_VOID:
 		case TYPE_INFERRED_VECTOR:
+		case TYPE_WILDCARD:
 			UNREACHABLE
 		case ALL_INTS:
 			expr_rewrite_const_int(expr, type, 0);
@@ -577,7 +578,6 @@ void expr_rewrite_to_const_zero(Expr *expr, Type *type)
 			break;
 		case TYPE_FUNC:
 		case TYPE_TYPEDEF:
-		case TYPE_OPTIONAL_ANY:
 		case TYPE_OPTIONAL:
 		case TYPE_TYPEINFO:
 		case TYPE_MEMBER:
@@ -590,7 +590,6 @@ void expr_rewrite_to_const_zero(Expr *expr, Type *type)
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_FLEXIBLE_ARRAY:
 		case TYPE_UNTYPED_LIST:
-		case TYPE_SCALED_VECTOR:
 		case TYPE_VECTOR:
 		{
 			ConstInitializer *init = CALLOCS(ConstInitializer);
@@ -642,8 +641,8 @@ bool expr_is_pure(Expr *expr)
 			return exprid_is_pure(expr->swizzle_expr.parent);
 		case EXPR_BUILTIN_ACCESS:
 			return exprid_is_pure(expr->builtin_access_expr.inner);
-		case EXPR_VARIANT:
-			return exprid_is_pure(expr->variant_expr.type_id) && exprid_is_pure(expr->variant_expr.ptr);
+		case EXPR_ANY:
+			return exprid_is_pure(expr->any_expr.type_id) && exprid_is_pure(expr->any_expr.ptr);
 		case EXPR_POINTER_OFFSET:
 			return exprid_is_pure(expr->pointer_offset_expr.ptr) && exprid_is_pure(expr->pointer_offset_expr.offset);
 		case EXPR_COMPILER_CONST:
@@ -666,7 +665,7 @@ bool expr_is_pure(Expr *expr)
 			return true;
 		case EXPR_BITASSIGN:
 			return false;
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANYSWITCH:
 			return false;
 		case EXPR_BINARY:
 			// Anything with assignment is impure, otherwise true if sub expr are pure.

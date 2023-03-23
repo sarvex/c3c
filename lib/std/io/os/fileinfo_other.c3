@@ -34,7 +34,7 @@ fn PathList! native_readdir(Path dir, bool no_dirs, bool no_symlinks, String mas
 	list.init(.using = using);
 	void* directory = opendir(dir.as_str() ? dir.as_zstr() : (ZString)".");
 	defer if (directory) closedir(directory);
-	if (!directory) return (path::is_dir(dir) ? IoError.CANNOT_READ_DIR : IoError.FILE_NOT_DIR)!;
+	if (!directory) return (path::is_dir(dir) ? IoError.CANNOT_READ_DIR : IoError.FILE_NOT_DIR)?;
 	NativeDirentry* entry;
 	while ((entry = readdir(directory)))
 	{
@@ -56,9 +56,9 @@ $if (!env::os_is_darwin() && !env::os_is_win32())
 
 fn usz! native_file_size(String path)
 {
-	File f = file::open(path, "r")?;
+	File f = file::open(path, "r")!;
 	defer (void)f.close();
-	return f.seek(0, Seek.END)?;
+	return f.seek(0, Seek.END)!;
 }
 
 $if (env::os_is_posix() && env::COMPILER_LIBC_AVAILABLE)

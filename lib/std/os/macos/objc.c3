@@ -24,7 +24,7 @@ macro Selector selector_register(char* c) => _macos_sel_registerName(c);
 macro Class! class_by_name(char* c)
 {
 	Class cls = _macos_objc_lookUpClass(c);
-	if (!cls) return ObjcFailure.CLASS_NOT_FOUND!;
+	if (!cls) return ObjcFailure.CLASS_NOT_FOUND?;
 	return cls;
 }
 

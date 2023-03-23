@@ -181,7 +181,7 @@ $if (COMPILER_LIBC_AVAILABLE && OS_TYPE != OsType.WIN32)
 	@pool()
 	{
 		ZString val = libc::getenv(name.zstr_tcopy());
-		return val ? val.as_str() : SearchResult.MISSING!;
+		return val ? val.as_str() : SearchResult.MISSING?;
 	};
 $else
 	return "";

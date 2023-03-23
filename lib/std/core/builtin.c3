@@ -49,7 +49,7 @@ macro void @swap(&a, &b) @builtin
  **/
 macro varcast(variant v, $Type) @builtin
 {
-	if (v.type != $Type.typeid) return VarCastResult.TYPE_MISMATCH!;
+	if (v.type != $Type.typeid) return VarCastResult.TYPE_MISMATCH?;
 	return ($Type*)v.ptr;
 }
 
@@ -61,7 +61,7 @@ struct CallstackElement
 	uint line;
 }
 
-fn void default_panic(String message, String file, String function, uint line)
+fn void default_panic(String message, String file, String function, uint line, args...)
 {
 	CallstackElement* stack = $$stacktrace();
 	$if ($defined(libc::stderr) && $defined(libc::fprintf))
@@ -69,17 +69,19 @@ fn void default_panic(String message, String file, String function, uint line)
 	if (stack) stack = stack.prev;
 	if (stack)
 	{
-		libc::fprintf(libc::stderr(), "\nERROR: '%.*s'\n", (int)message.len, message.ptr);
+		(void)io::stderr().print("\nERROR: '");
+		(void)io::stderr().printf(message, ...args);
+		(void)io::stderr().printn("'");
 	}
 	else
 	{
-		libc::fprintf(libc::stderr(), "\nERROR: '%.*s', function %.*s (%.*s:%d)\n",
-			(int)message.len, message.ptr, (int)function.len, function.ptr, (int)file.len, file.ptr, line);
+		(void)io::stderr().print("\nERROR: '");
+		(void)io::stderr().printf(message, ...args);
+		(void)io::stderr().printfn("', in function %s (%s:%d)", function, file, line);
 	}
 	while (stack)
 	{
-		libc::fprintf(libc::stderr(), "  at function %.*s (%.*s:%u)\n", (int)stack.function.len, stack.function.ptr,
-		    (int)stack.file.len, stack.file.ptr, stack.line);
+		(void)io::stderr().printfn("  in function %s (%s:%d)", stack.function, stack.file, stack.line);
 		if (stack == stack.prev) break;
 		stack = stack.prev;
 	}
@@ -88,13 +90,13 @@ fn void default_panic(String message, String file, String function, uint line)
 	$$trap();
 }
 
-typedef PanicFn = fn void(String message, String file, String function, uint line);
+typedef PanicFn = fn void(String message, String file, String function, uint line, args...);
 
 PanicFn panic = &default_panic;
 
-macro void unreachable($string = "Unreachable statement reached.") @builtin @noreturn
+macro void unreachable($string = "Unreachable statement reached.", ...) @builtin @noreturn
 {
-	panic($string, $$FILE, $$FUNC, $$LINE);
+	panic($string, $$FILE, $$FUNC, $$LINE, $vasplat());
 	$$unreachable();
 }
 
@@ -115,9 +117,9 @@ macro enum_by_name($Type, String enum_name) @builtin
 	typeid x = $Type.typeid;
 	foreach (i, name : x.names)
 	{
-		if (str::compare(name, enum_name)) return ($Type)i;
+		if (name == enum_name) return ($Type)i;
 	}
-	return SearchResult.MISSING!;
+	return SearchResult.MISSING?;
 }
 
 macro bool @likely(bool value, $probability = 1.0) @builtin
@@ -204,6 +206,6 @@ macro uint ichar.hash(ichar c) => c;
 macro uint long.hash(long i) => (uint)((i >> 32) ^ i);
 macro uint ulong.hash(ulong i) => (uint)((i >> 32) ^ i);
 macro uint bool.hash(bool b) => (uint)b;
-macro uint typeid.hash(typeid t) => (uint)(((uptr)t >> 32) ^ (uptr)t);
+macro uint typeid.hash(typeid t) => ((ulong)(uptr)t).hash();
 macro uint String.hash(String c) => (uint)fnv32a::encode(c);
 macro uint char[].hash(char[] c) => (uint)fnv32a::encode(c);

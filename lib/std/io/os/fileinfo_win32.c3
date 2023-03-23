@@ -1,5 +1,5 @@
 module std::io::file::os;
-import std::os::win32::files;
+import std::os::win32;
 
 $if (env::os_is_win32())
 
@@ -7,9 +7,9 @@ fn usz! native_file_size(String path)
 {
 	@pool()
 	{
-		Char16[] path16 = path.to_temp_utf16()?;
+		Char16[] path16 = path.to_temp_utf16()!;
 		Win32_FILE_ATTRIBUTE_DATA data;
-		files::win32_GetFileAttributesExW(path16, Win32_GET_FILEEX_INFO_LEVELS.STANDARD, &data);
+		win32::win32_GetFileAttributesExW(path16, Win32_GET_FILEEX_INFO_LEVELS.STANDARD, &data);
 		Win32_LARGE_INTEGER size;
 		size.lowPart = data.nFileSizeLow;
 		size.highPart = data.nFileSizeHigh;
@@ -21,7 +21,7 @@ fn bool native_file_or_dir_exists(String path)
 {
 	@pool()
 	{
-		return (bool)files::win32_PathFileExistsW(path.to_temp_utf16()) ?? false;
+		return (bool)win32::win32_PathFileExistsW(path.to_temp_utf16()) ?? false;
 	};
 }
 
@@ -42,10 +42,10 @@ fn Path! native_temp_directory(Allocator* using = mem::heap())
 {
 	@stack_mem(256; Allocator* mem)
 	{
-	    Win32_DWORD len = files::win32_GetTempPathW(0, null);
-		if (!len) return IoError.GENERAL_ERROR!;
+	    Win32_DWORD len = win32::win32_GetTempPathW(0, null);
+		if (!len) return IoError.GENERAL_ERROR?;
 		Char16[] buff = malloc(Char16, len + 1, .using = mem);
-		if (!files::win32_GetTempPathW(len, buff)) return IoError.GENERAL_ERROR!;
+		if (!win32::win32_GetTempPathW(len, buff)) return IoError.GENERAL_ERROR?;
 		return path::new(string::from_utf16(buff[:len], .using = mem), using);
 	};
 }

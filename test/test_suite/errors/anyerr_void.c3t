@@ -5,7 +5,7 @@ fault MyError
 }
 fn void! errorThing()
 {
-    return MyError.BAR!;
+    return MyError.BAR?;
 }
 
 fn void! errorThing2()

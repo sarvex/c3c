@@ -469,7 +469,7 @@ void llvm_emit_for_stmt(GenContext *c, Ast *ast)
 		{
 			SourceSpan loc = ast->span;
 
-			llvm_emit_panic(c, "Infinite loop found", loc);
+			llvm_emit_panic(c, "Infinite loop found", loc, NULL);
 			LLVMBuildUnreachable(c->builder);
 			LLVMBasicBlockRef block = llvm_basic_block_new(c, "unreachable_block");
 			c->current_block = NULL;
@@ -749,7 +749,7 @@ static void llvm_emit_switch_jump_table(GenContext *c,
 static void llvm_emit_switch_body(GenContext *c, BEValue *switch_value, Ast *switch_ast)
 {
 	bool is_if_chain = switch_ast->switch_stmt.flow.if_chain;
-	Type *switch_type = switch_ast->ast_kind == AST_IF_CATCH_SWITCH_STMT ? type_lowering(type_anyerr) : exprptr(switch_ast->switch_stmt.cond)->type;
+	Type *switch_type = switch_ast->ast_kind == AST_IF_CATCH_SWITCH_STMT ? type_lowering(type_anyerr) : switch_value->type;
 
 	Ast **cases = switch_ast->switch_stmt.cases;
 	ArraySize case_count = vec_size(cases);
@@ -865,11 +865,21 @@ static void llvm_emit_switch_body(GenContext *c, BEValue *switch_value, Ast *swi
 	llvm_emit_block(c, exit_block);
 }
 
-void gencontext_emit_switch(GenContext *context, Ast *ast)
+void llvm_emit_switch(GenContext *c, Ast *ast)
 {
 	BEValue switch_value;
-	llvm_emit_decl_expr_list(context, &switch_value, exprptrzero(ast->switch_stmt.cond), false);
-	llvm_emit_switch_body(context, &switch_value, ast);
+	Expr *expr = exprptrzero(ast->switch_stmt.cond);
+	if (expr)
+	{
+		// Regular switch
+		llvm_emit_decl_expr_list(c, &switch_value, expr, false);
+	}
+	else
+	{
+		// Match switch, so set the value to true
+		llvm_value_set(&switch_value, llvm_const_int(c, type_bool, 1), type_bool);
+	}
+	llvm_emit_switch_body(c, &switch_value, ast);
 }
 
 
@@ -1002,7 +1012,7 @@ static inline void llvm_emit_assert_stmt(GenContext *c, Ast *ast)
 		{
 			error = "Assert violation";
 		}
-		llvm_emit_panic(c, error, loc);
+		llvm_emit_panic(c, error, loc, NULL);
 		llvm_emit_br(c, on_ok);
 		llvm_emit_block(c, on_ok);
 	}
@@ -1344,10 +1354,8 @@ LLVMValueRef llvm_emit_zstring_named(GenContext *c, const char *str, const char 
 }
 
 
-void llvm_emit_panic(GenContext *c, const char *message, SourceSpan loc)
+void llvm_emit_panic(GenContext *c, const char *message, SourceSpan loc, BEValue *varargs)
 {
-	File  *file = source_file_by_id(loc.file_id);
-
 	if (c->debug.builder) llvm_emit_debug_location(c, loc);
 	if (c->debug.stack_slot_row)
 	{
@@ -1364,7 +1372,9 @@ void llvm_emit_panic(GenContext *c, const char *message, SourceSpan loc)
 		return;
 	}
 
-	LLVMValueRef args[4] = {
+	File *file = source_file_by_id(loc.file_id);
+
+	LLVMValueRef panic_args[5] = {
 			llvm_emit_string_const(c, message, ".panic_msg"),
 			llvm_emit_string_const(c, file->name, ".file"),
 			llvm_emit_string_const(c, c->cur_func.name, ".func"),
@@ -1378,9 +1388,31 @@ void llvm_emit_panic(GenContext *c, const char *message, SourceSpan loc)
 	for (unsigned i = 0; i < 4; i++)
 	{
 		Type *type = type_lowering(types[i]);
-		BEValue value = { .value = args[i], .type = type };
+		BEValue value = { .value = panic_args[i], .type = type };
 		llvm_emit_parameter(c, actual_args, &count, abi_args[i], &value, type);
 	}
+
+	unsigned elements = vec_size(varargs);
+	Type *any_subarray = type_get_subarray(type_any);
+	Type *any_array = type_get_array(type_any, elements);
+	LLVMTypeRef llvm_array_type = llvm_get_type(c, any_array);
+	AlignSize alignment = type_alloca_alignment(any_array);
+	LLVMValueRef array_ref = llvm_emit_alloca(c, llvm_array_type, alignment, "varargslots");
+	VECEACH(varargs, i)
+	{
+		AlignSize store_alignment;
+		LLVMValueRef slot = llvm_emit_array_gep_raw(c,
+		                                            array_ref,
+		                                            llvm_array_type,
+													i,
+		                                            alignment,
+		                                            &store_alignment);
+		llvm_store_to_ptr_aligned(c, slot, &varargs[i], store_alignment);
+	}
+	BEValue value;
+	llvm_value_aggregate_two(c, &value, any_subarray, array_ref, llvm_const_int(c, type_usz, elements));
+
+	llvm_emit_parameter(c, actual_args, &count, abi_args[4], &value, any_subarray);
 
 	BEValue val;
 	llvm_value_set_decl(c, &val, panic_var);
@@ -1392,7 +1424,8 @@ void llvm_emit_panic(GenContext *c, const char *message, SourceSpan loc)
 	                   count, 0, NULL, false, NULL);
 }
 
-void llvm_emit_panic_if_true(GenContext *c, BEValue *value, const char *panic_name, SourceSpan loc)
+void llvm_emit_panic_if_true(GenContext *c, BEValue *value, const char *panic_name, SourceSpan loc, BEValue *value_1,
+                             BEValue *value_2)
 {
 	if (llvm_is_const(value->value))
 	{
@@ -1404,22 +1437,30 @@ void llvm_emit_panic_if_true(GenContext *c, BEValue *value, const char *panic_na
 	assert(llvm_value_is_bool(value));
 	llvm_emit_cond_br(c, value, panic_block, ok_block);
 	llvm_emit_block(c, panic_block);
-	llvm_emit_panic(c, panic_name, loc);
+	BEValue *values = NULL;
+	if (value_1)
+	{
+		BEValue var = *value_1;
+		llvm_emit_any_from_value(c, &var, var.type);
+		vec_add(values, var);
+		if (value_2)
+		{
+			var = *value_2;
+			llvm_emit_any_from_value(c, &var, var.type);
+			vec_add(values, var);
+		}
+	}
+	llvm_emit_panic(c, panic_name, loc, values);
 	llvm_emit_br(c, ok_block);
 	llvm_emit_block(c, ok_block);
 }
 
-void llvm_emit_panic_on_true(GenContext *c, LLVMValueRef value, const char *panic_name, SourceSpan loc)
+void llvm_emit_panic_on_true(GenContext *c, LLVMValueRef value, const char *panic_name, SourceSpan loc,
+                             BEValue *value_1, BEValue *value_2)
 {
-	LLVMBasicBlockRef panic_block = llvm_basic_block_new(c, "panic");
-	LLVMBasicBlockRef ok_block = llvm_basic_block_new(c, "checkok");
 	BEValue be_value;
 	llvm_value_set(&be_value, value, type_bool);
-	llvm_emit_cond_br(c, &be_value, panic_block, ok_block);
-	llvm_emit_block(c, panic_block);
-	llvm_emit_panic(c, panic_name, loc);
-	llvm_emit_br(c, ok_block);
-	llvm_emit_block(c, ok_block);
+	llvm_emit_panic_if_true(c, &be_value, panic_name, loc, value_1, value_2);
 }
 
 
@@ -1433,6 +1474,7 @@ void llvm_emit_stmt(GenContext *c, Ast *ast)
 		case AST_FOREACH_STMT:
 		case AST_CONTRACT:
 		case AST_ASM_STMT:
+		case AST_CONTRACT_FAULT:
 			UNREACHABLE
 		case AST_EXPR_STMT:
 			llvm_emit_expr_stmt(c, ast);
@@ -1472,7 +1514,7 @@ void llvm_emit_stmt(GenContext *c, Ast *ast)
 		case AST_FOR_STMT:
 			llvm_emit_for_stmt(c, ast);
 			break;
-		case AST_NEXT_STMT:
+		case AST_NEXTCASE_STMT:
 			gencontext_emit_next_stmt(c, ast);
 			break;
 		case AST_DEFER_STMT:
@@ -1495,7 +1537,7 @@ void llvm_emit_stmt(GenContext *c, Ast *ast)
 		case AST_CT_FOREACH_STMT:
 			UNREACHABLE
 		case AST_SWITCH_STMT:
-			gencontext_emit_switch(c, ast);
+			llvm_emit_switch(c, ast);
 			break;
 	}
 }

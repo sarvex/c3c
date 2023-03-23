@@ -72,8 +72,9 @@ typedef enum
 	AST_RETURN_STMT,
 	AST_BLOCK_EXIT_STMT,
 	AST_SWITCH_STMT,
-	AST_NEXT_STMT,
+	AST_NEXTCASE_STMT,
 	AST_CONTRACT,
+	AST_CONTRACT_FAULT,
 } AstKind;
 
 
@@ -163,7 +164,7 @@ typedef enum
 		case EXPR_CT_CHECKS: \
 		case EXPR_CT_ARG: case EXPR_TYPEINFO: case EXPR_CT_IDENT: case EXPR_HASH_IDENT: \
 		case EXPR_COMPILER_CONST: case EXPR_CT_CALL: case EXPR_FLATPATH: \
-		case EXPR_VARIANTSWITCH: case EXPR_STRINGIFY: case EXPR_CT_EVAL
+		case EXPR_ANYSWITCH: case EXPR_STRINGIFY: case EXPR_CT_EVAL
 
 typedef enum
 {
@@ -172,7 +173,7 @@ typedef enum
 	CONTRACT_REQUIRE,
 	CONTRACT_CHECKED,
 	CONTRACT_PARAM,
-	CONTRACT_ERRORS,
+	CONTRACT_OPTIONALS,
 	CONTRACT_ENSURE,
 } ContractKind;
 
@@ -185,7 +186,7 @@ typedef enum
 	INTROSPECT_TYPE_FLOAT = 4,
 	INTROSPECT_TYPE_TYPEID = 5,
 	INTROSPECT_TYPE_ANYERR = 6,
-	INTROSPECT_TYPE_VARIANT = 7,
+	INTROSPECT_TYPE_ANY = 7,
 	INTROSPECT_TYPE_ENUM = 8,
 	INTROSPECT_TYPE_FAULT = 9,
 	INTROSPECT_TYPE_STRUCT = 10,
@@ -261,8 +262,8 @@ typedef enum
 	EXPR_TYPEID_INFO,
 	EXPR_TYPEINFO,
 	EXPR_UNARY,
-	EXPR_VARIANT,
-	EXPR_VARIANTSWITCH,
+	EXPR_ANY,
+	EXPR_ANYSWITCH,
 	EXPR_VASPLAT,
 } ExprKind;
 
@@ -337,7 +338,7 @@ typedef enum
 {
 	PREC_NONE,
 	PREC_ASSIGNMENT,        // =, *=, /=, %=, +=, etc
-	PREC_TERNARY,           // ?: ??
+	PREC_TERNARY,           // ?: ? ??
 	PREC_OR,                // ||
 	PREC_AND,               // &&
 	PREC_RELATIONAL,        // < > <= >= == !=
@@ -346,7 +347,7 @@ typedef enum
 	PREC_SHIFT,             // << >>
 	PREC_MULTIPLICATIVE,    // * / %
 	PREC_UNARY,             // ! - + ~ * & prefix ++/-- try? catch? (type)
-	PREC_CALL,              // . () [] postfix ++/--
+	PREC_CALL,              // . () [] postfix ++ -- !! !
 	PREC_MACRO,
 	PREC_FIRST = PREC_MACRO
 } Precedence;
@@ -379,7 +380,6 @@ typedef enum
 	TYPE_INFO_VECTOR,
 	TYPE_INFO_INFERRED_ARRAY,
 	TYPE_INFO_INFERRED_VECTOR,
-	TYPE_INFO_SCALED_VECTOR,
 	TYPE_INFO_SUBARRAY,
 	TYPE_INFO_POINTER,
 } TypeInfoKind;
@@ -460,8 +460,8 @@ typedef enum
 	TOKEN_CONST_IDENT,      // Any purely uppercase ident,
 	TOKEN_TYPE_IDENT,       // Any ident on the format FooBar or __FooBar
 
-	// We want to parse $foo separately.
-	// Otherwise we allow things like "# foo" which would be pretty bad.
+	// We want to parse $foo separately,
+	// otherwise we allow things like "$ foo" which would be pretty bad.
 	TOKEN_CT_IDENT,         // $foobar
 	TOKEN_CT_CONST_IDENT,   // $FOOBAR
 	TOKEN_CT_TYPE_IDENT,    // $Foobar
@@ -541,7 +541,6 @@ typedef enum
 	TOKEN_MODULE,
 	TOKEN_NEXTCASE,
 	TOKEN_NULL,
-	TOKEN_PRIVATE,
 	TOKEN_RETURN,
 	TOKEN_STATIC,
 	TOKEN_STRUCT,
@@ -561,7 +560,6 @@ typedef enum
 	TOKEN_CT_DEFAULT,           // $default
 	TOKEN_CT_DEFINED,           // $defined
 	TOKEN_CT_ECHO,              // $echo
-	TOKEN_CT_ELIF,              // $elif
 	TOKEN_CT_ELSE,              // $else
 	TOKEN_CT_ENDFOR,            // $endfor
 	TOKEN_CT_ENDFOREACH,        // $endforeach
@@ -639,6 +637,7 @@ typedef enum
 	TYPE_INTEGER_LAST = TYPE_U128,
 	TYPE_F16,
 	TYPE_FLOAT_FIRST = TYPE_F16,
+	TYPE_BF16,
 	TYPE_F32,
 	TYPE_F64,
 	TYPE_F128,
@@ -657,27 +656,28 @@ typedef enum
 	TYPE_TYPEDEF,
 	TYPE_DISTINCT,
 	TYPE_ARRAY,
+	TYPE_FIRST_ARRAYLIKE = TYPE_ARRAY,
 	TYPE_SUBARRAY,
-	TYPE_INFERRED_ARRAY,
 	TYPE_FLEXIBLE_ARRAY,
+	TYPE_INFERRED_ARRAY,
+	TYPE_VECTOR,
+	TYPE_INFERRED_VECTOR,
+	TYPE_LAST_ARRAYLIKE = TYPE_INFERRED_VECTOR,
 	TYPE_UNTYPED_LIST,
 	TYPE_OPTIONAL,
-	TYPE_OPTIONAL_ANY,
+	TYPE_WILDCARD,
 	TYPE_TYPEINFO,
 	TYPE_MEMBER,
-	TYPE_INFERRED_VECTOR,
-	TYPE_SCALED_VECTOR,
-	TYPE_VECTOR,
 	TYPE_LAST = TYPE_ANY
 } TypeKind;
 
 #define CT_TYPES TYPE_TYPEINFO: case TYPE_INFERRED_ARRAY: case TYPE_INFERRED_VECTOR: case TYPE_UNTYPED_LIST: \
-case TYPE_POISONED: case TYPE_MEMBER
+case TYPE_POISONED: case TYPE_MEMBER: case TYPE_WILDCARD
 #define ALL_INTS TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128: \
 case TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64: case TYPE_U128
 #define ALL_SIGNED_INTS TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128
 #define ALL_UNSIGNED_INTS TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64: case TYPE_U128
-#define ALL_FLOATS TYPE_F16: case TYPE_F32: case TYPE_F64: case TYPE_F128
+#define ALL_FLOATS TYPE_BF16: case TYPE_F16: case TYPE_F32: case TYPE_F64: case TYPE_F128
 
 #define TYPE_KINDS (TYPE_LAST + 1)
 
@@ -936,6 +936,7 @@ typedef enum
 typedef enum
 {
 	TYPE_PROPERTY_ALIGNOF,
+	TYPE_PROPERTY_ASSOCIATED,
 	TYPE_PROPERTY_ELEMENTS,
 	TYPE_PROPERTY_EXTNAMEOF,
 	TYPE_PROPERTY_INF,

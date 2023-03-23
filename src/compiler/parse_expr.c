@@ -64,6 +64,20 @@ bool parse_range(ParseContext *c, Range *range)
 }
 
 /**
+ * rethrow_expr ::= call_expr '!'
+ */
+static Expr *parse_rethrow_expr(ParseContext *c, Expr *left_side)
+{
+	assert(expr_ok(left_side));
+	advance_and_verify(c, TOKEN_BANG);
+	Expr *expr_ternary = expr_new_expr(EXPR_RETHROW, left_side);
+	expr_ternary->rethrow_expr.inner = left_side;
+	RANGE_EXTEND_PREV(expr_ternary);
+
+	return expr_ternary;
+}
+
+/**
  * Parse lhs [op] [rhs]
  * This will return lhs if no candidate is found.
  */
@@ -72,6 +86,7 @@ inline Expr *parse_precedence_with_left_side(ParseContext *c, Expr *left_side, P
 	while (1)
 	{
 		TokenType tok = c->tok;
+
 		Precedence token_precedence = rules[tok].precedence;
 		// See if the operator precedence is greater than the last, if so exit.
 		// Note that if the token is not an operator then token_precedence = 0
@@ -91,7 +106,6 @@ inline Expr *parse_precedence_with_left_side(ParseContext *c, Expr *left_side, P
 	}
 	return left_side;
 }
-
 
 /**
  * Parse an expression in any position.
@@ -130,14 +144,14 @@ static inline Expr *parse_for_try_expr(ParseContext *c)
 }
 
 /**
- * catch_unwrap ::= CATCH IDENT | (type? IDENT '=' (expr | '(' expr (',' expr) ')'))
+ * catch_unwrap ::= CATCH (IDENT | type? IDENT '=' (expr | '(' expr (',' expr) ')')))
  */
 static inline Expr *parse_catch_unwrap(ParseContext *c)
 {
 	Expr *expr = expr_new(EXPR_CATCH_UNWRAP, c->span);
 	advance_and_verify(c, TOKEN_CATCH);
 	TypeInfo *type = NULL;
-	ASSIGN_EXPR_OR_RET(Expr * lhs, parse_precedence(c, IF_TRY_CATCH_PREC), poisoned_expr);
+	ASSIGN_EXPR_OR_RET(Expr *lhs, parse_precedence(c, IF_TRY_CATCH_PREC), poisoned_expr);
 	if (lhs->expr_kind == EXPR_TYPEINFO)
 	{
 		expr->catch_unwrap_expr.type = lhs->type_expr;
@@ -234,6 +248,9 @@ static inline Expr *parse_try_unwrap_chain(ParseContext *c)
 	return try_unwrap_chain;
 }
 
+/**
+ * assert_expr ::= try_unwrap_chain | expr
+ */
 Expr *parse_assert_expr(ParseContext *c)
 {
 	if (tok_is(c, TOKEN_TRY))
@@ -305,7 +322,7 @@ Expr* parse_constant_expr(ParseContext *c)
 }
 
 /**
- * param_path : ('[' expression ']' | '.' IDENT)*
+ * param_path ::= ('[' expr ']' | '.' IDENT)*
  *
  * @param c
  * @param path reference to the path to return
@@ -408,11 +425,12 @@ Expr *parse_vasplat(ParseContext *c)
 	return expr;
 }
 /**
- * param_list ::= ('...' parameter | parameter (',' parameter)*)?
+ * param_list ::= ('...' arg | arg (',' arg)*)?
  *
  * parameter ::= (param_path '=')? expr
  */
-bool parse_arg_list(ParseContext *c, Expr ***result, TokenType param_end, bool *splat, bool vasplat)
+bool parse_arg_list(ParseContext *c, Expr ***result, TokenType param_end, bool *splat, bool vasplat,
+                    bool allow_trailing_comma)
 {
 	*result = NULL;
 	if (splat) *splat = false;
@@ -453,7 +471,15 @@ bool parse_arg_list(ParseContext *c, Expr ***result, TokenType param_end, bool *
 		{
 			return true;
 		}
-		if (tok_is(c, param_end)) return true;
+		if (tok_is(c, param_end))
+		{
+			if (!allow_trailing_comma)
+			{
+				sema_error_at(c->prev_span, "Trailing commas are not allowed.");
+				return false;
+			}
+			return true;
+		}
 		if (splat && *splat)
 		{
 			SEMA_ERROR_HERE("'...' is only allowed on the last argument in a call.");
@@ -465,11 +491,7 @@ bool parse_arg_list(ParseContext *c, Expr ***result, TokenType param_end, bool *
 
 
 /**
- * expression_list
- *	: expression
- *	| expression_list ',' expression
- *	;
- * @return Ast *
+ * expression_list ::= decl_or_expr+
  */
 Expr *parse_expression_list(ParseContext *c, bool allow_decl)
 {
@@ -606,39 +628,42 @@ static Expr *parse_post_unary(ParseContext *c, Expr *left)
 }
 
 
-
-
-static Expr *parse_ternary_expr(ParseContext *c, Expr *left_side)
+static Expr *parse_elvis_expr(ParseContext *c, Expr *left_side)
 {
 	assert(expr_ok(left_side));
 
 	Expr *expr_ternary = expr_new_expr(EXPR_TERNARY, left_side);
 	expr_ternary->ternary_expr.cond = exprid(left_side);
-
-
-	// Check for elvis
-	if (try_consume(c, TOKEN_ELVIS))
-	{
-		expr_ternary->ternary_expr.then_expr = 0;
-	}
-	else
-	{
-		advance_and_verify(c, TOKEN_QUESTION);
-		if (!rules[c->tok].prefix)
-		{
-			expr_ternary->expr_kind = EXPR_RETHROW;
-			expr_ternary->rethrow_expr.inner = left_side;
-			RANGE_EXTEND_PREV(expr_ternary);
-			return expr_ternary;
-		}
-		ASSIGN_EXPR_OR_RET(Expr * true_expr, parse_expr(c), poisoned_expr);
-		expr_ternary->ternary_expr.then_expr = exprid(true_expr);
-		CONSUME_OR_RET(TOKEN_COLON, poisoned_expr);
-	}
-
+	advance_and_verify(c, TOKEN_ELVIS);
+	expr_ternary->ternary_expr.then_expr = 0;
 	ASSIGN_EXPRID_OR_RET(expr_ternary->ternary_expr.else_expr, parse_precedence(c, PREC_TERNARY), poisoned_expr);
 	RANGE_EXTEND_PREV(expr_ternary);
 	return expr_ternary;
+
+}
+static Expr *parse_ternary_expr(ParseContext *c, Expr *left_side)
+{
+	assert(expr_ok(left_side));
+
+	Expr *expr = expr_new_expr(EXPR_TERNARY, left_side);
+	advance_and_verify(c, TOKEN_QUESTION);
+
+	if (!rules[c->tok].prefix || (c->tok == TOKEN_BANG && !rules[peek(c)].prefix))
+	{
+		expr->expr_kind = EXPR_OPTIONAL;
+		expr->inner_expr = left_side;
+		RANGE_EXTEND_PREV(expr);
+		return expr;
+	}
+
+	expr->ternary_expr.cond = exprid(left_side);
+	ASSIGN_EXPR_OR_RET(Expr *true_expr, parse_expr(c), poisoned_expr);
+	expr->ternary_expr.then_expr = exprid(true_expr);
+	CONSUME_OR_RET(TOKEN_COLON, poisoned_expr);
+
+	ASSIGN_EXPRID_OR_RET(expr->ternary_expr.else_expr, parse_precedence(c, PREC_TERNARY), poisoned_expr);
+	RANGE_EXTEND_PREV(expr);
+	return expr;
 }
 
 /**
@@ -696,7 +721,7 @@ Expr *parse_initializer_list(ParseContext *c, Expr *left)
 	if (!try_consume(c, TOKEN_RBRACE))
 	{
 		Expr **exprs = NULL;
-		if (!parse_arg_list(c, &exprs, TOKEN_RBRACE, NULL, true)) return poisoned_expr;
+		if (!parse_arg_list(c, &exprs, TOKEN_RBRACE, NULL, true, true)) return poisoned_expr;
 		int designated = -1;
 		VECEACH(exprs, i)
 		{
@@ -734,16 +759,24 @@ Expr *parse_initializer_list(ParseContext *c, Expr *left)
 	return initializer_list;
 }
 
-static Expr *parse_optional(ParseContext *c, Expr *left_side)
+static Expr *parse_orelse(ParseContext *c, Expr *left_side)
 {
-	Expr *optional = expr_new(EXPR_OPTIONAL, left_side->span);
-	advance_and_verify(c, TOKEN_BANG);
-	optional->inner_expr = left_side;
-	RANGE_EXTEND_PREV(optional);
-	return optional;
+	assert(left_side && expr_ok(left_side));
+
+	advance_and_verify(c, TOKEN_QUESTQUEST);
+
+	Expr *right_side;
+	// Assignment operators have precedence right -> left.
+	ASSIGN_EXPR_OR_RET(right_side, parse_precedence(c, PREC_TERNARY), poisoned_expr);
+
+	Expr *expr = expr_new_expr(EXPR_BINARY, left_side);
+	expr->binary_expr.operator = BINARYOP_ELSE;
+	expr->binary_expr.left = exprid(left_side);
+	expr->binary_expr.right = exprid(right_side);
+
+	RANGE_EXTEND_PREV(expr);
+	return expr;
 }
-
-
 
 static Expr *parse_binary(ParseContext *c, Expr *left_side)
 {
@@ -786,7 +819,7 @@ static Expr *parse_call_expr(ParseContext *c, Expr *left)
 	{
 		// Pick a modest guess.
 		params = VECNEW(Expr*, 4);
-		if (!parse_arg_list(c, &params, TOKEN_RPAREN, &splat, true)) return poisoned_expr;
+		if (!parse_arg_list(c, &params, TOKEN_RPAREN, &splat, true, false)) return poisoned_expr;
 	}
 	if (try_consume(c, TOKEN_EOS))
 	{
@@ -1591,6 +1624,9 @@ static int append_esc_string_token(char *restrict dest, const char *restrict src
 	return scanned;
 }
 
+/**
+ * string_literal ::= STRING+
+ */
 static Expr *parse_string_literal(ParseContext *c, Expr *left)
 {
 	assert(!left && "Had left hand side");
@@ -1604,8 +1640,15 @@ static Expr *parse_string_literal(ParseContext *c, Expr *left)
 	// and can be optimized.
 	while (tok_is(c, TOKEN_STRING))
 	{
+		// Grab the token.
 		size_t next_len = c->data.strlen;
-		if (!next_len) continue;
+		if (!next_len)
+		{
+			// Zero length so just continue.
+			advance_and_verify(c, TOKEN_STRING);
+			continue;
+		}
+		// Create new string and copy.
 		char *buffer = malloc_string(len + next_len + 1);
 		memcpy(buffer, str, len);
 		memcpy(buffer + len, symstr(c), next_len);
@@ -1614,7 +1657,6 @@ static Expr *parse_string_literal(ParseContext *c, Expr *left)
 		str = buffer;
 		advance_and_verify(c, TOKEN_STRING);
 	}
-
 	if (len > UINT32_MAX)
 	{
 		SEMA_ERROR_HERE("String exceeded max size.");
@@ -1625,19 +1667,27 @@ static Expr *parse_string_literal(ParseContext *c, Expr *left)
 	expr_string->const_expr.string.len = (uint32_t)len;
 	expr_string->type = type_string;
 	expr_string->const_expr.const_kind = CONST_STRING;
+	expr_string->resolve_status = RESOLVE_DONE;
 	return expr_string;
 }
 
+/*
+ * bool ::= 'true' | 'false'
+ */
 static Expr *parse_bool(ParseContext *c, Expr *left)
 {
 	assert(!left && "Had left hand side");
 	Expr *number = EXPR_NEW_TOKEN(EXPR_CONST);
 	number->const_expr = (ExprConst) { .b = tok_is(c, TOKEN_TRUE), .const_kind = CONST_BOOL };
 	number->type = type_bool;
+	number->resolve_status = RESOLVE_DONE;
 	advance(c);
 	return number;
 }
 
+/**
+ * Parse 'null', creating a const void* with zero address.
+ */
 static Expr *parse_null(ParseContext *c, Expr *left)
 {
 	assert(!left && "Had left hand side");
@@ -1645,10 +1695,14 @@ static Expr *parse_null(ParseContext *c, Expr *left)
 	number->const_expr.const_kind = CONST_POINTER;
 	number->const_expr.ptr = 0;
 	number->type = type_voidptr;
+	number->resolve_status = RESOLVE_DONE;
 	advance(c);
 	return number;
 }
 
+/**
+ * Expects an initializer list, then appends the type making it a compound expr rather than initializer list.
+ */
 Expr *parse_type_compound_literal_expr_after_type(ParseContext *c, TypeInfo *type_info)
 {
 	Expr *expr = expr_new(EXPR_COMPOUND_LITERAL, type_info->span);
@@ -1659,22 +1713,8 @@ Expr *parse_type_compound_literal_expr_after_type(ParseContext *c, TypeInfo *typ
 	return expr;
 }
 
-
-Expr *parse_any_expression(ParseContext *c, TypeInfo *type)
-{
-	Expr *expr = expr_new(EXPR_VARIANT, type->span);
-	advance_and_verify(c, TOKEN_LBRACE);
-	ASSIGN_EXPRID_OR_RET(expr->variant_expr.ptr, parse_expr(c), poisoned_expr);
-	TRY_CONSUME_OR_RET(TOKEN_COMMA, "Expected a ','", poisoned_expr);
-	ASSIGN_EXPRID_OR_RET(expr->variant_expr.type_id, parse_expr(c), poisoned_expr);
-	TRY_CONSUME_OR_RET(TOKEN_RBRACE, "Missing end '}'", poisoned_expr);
-	return expr;
-}
 /**
- * type_identifier ::= TYPE_IDENT initializer_list?
- *
- * @param left must be null.
- * @return Expr*
+ * type_expression_with_path ::= TYPE_IDENT initializer_list?
  */
 Expr *parse_type_expression_with_path(ParseContext *c, Path *path)
 {
@@ -1695,10 +1735,6 @@ Expr *parse_type_expression_with_path(ParseContext *c, Path *path)
 	}
 	if (tok_is(c, TOKEN_LBRACE))
 	{
-		if (type->resolve_status == RESOLVE_DONE && type->type == type_any)
-		{
-			return parse_any_expression(c, type);
-		}
 		return parse_type_compound_literal_expr_after_type(c, type);
 	}
 	Expr *expr = expr_new(EXPR_TYPEINFO, type->span);
@@ -1714,8 +1750,7 @@ Expr *parse_type_expression_with_path(ParseContext *c, Path *path)
 
 
 /**
- * function_block
- *  : '{|' stmt_list '|}'
+ * expr_block ::= '{|' opt_stmt_list '|}'
  */
 static Expr* parse_expr_block(ParseContext *c, Expr *left)
 {
@@ -1759,8 +1794,8 @@ ParseRule rules[TOKEN_EOF + 1] = {
 		[TOKEN_VARIANT] = { parse_type_identifier, NULL, PREC_NONE },
 
 		[TOKEN_QUESTION] = { NULL, parse_ternary_expr, PREC_TERNARY },
-		[TOKEN_QUESTQUEST] = { NULL, parse_binary, PREC_TERNARY},
-		[TOKEN_ELVIS] = { NULL, parse_ternary_expr, PREC_TERNARY },
+		[TOKEN_QUESTQUEST] = { NULL, parse_orelse, PREC_TERNARY },
+		[TOKEN_ELVIS] = { NULL, parse_elvis_expr, PREC_TERNARY },
 		[TOKEN_PLUSPLUS] = { parse_unary_expr, parse_post_unary, PREC_CALL },
 		[TOKEN_MINUSMINUS] = { parse_unary_expr, parse_post_unary, PREC_CALL },
 		[TOKEN_LPAREN] = { parse_grouping_expr, parse_call_expr, PREC_CALL },
@@ -1775,7 +1810,7 @@ ParseRule rules[TOKEN_EOF + 1] = {
 		[TOKEN_MOD] = { NULL, parse_binary, PREC_MULTIPLICATIVE },
 		[TOKEN_STAR] = { parse_unary_expr, parse_binary, PREC_MULTIPLICATIVE },
 		[TOKEN_DOT] = { NULL, parse_access_expr, PREC_CALL },
-		[TOKEN_BANG] = { parse_unary_expr, parse_optional, PREC_CALL },
+		[TOKEN_BANG] = { parse_unary_expr, parse_rethrow_expr, PREC_CALL },
 		[TOKEN_BYTES] = { parse_bytes_expr, NULL, PREC_NONE },
 		[TOKEN_BIT_NOT] = { parse_unary_expr, NULL, PREC_UNARY },
 		[TOKEN_BIT_XOR] = { NULL, parse_binary, PREC_BIT },

@@ -428,6 +428,7 @@ const Errno ENETDOWN = 50;      // Network is down MacOS
 const Errno ENETUNREACH = 51;   // Network is unreachable MacOS
 const Errno ENETRESET = 52;     // Network dropped connection because of reset MacOS
 const Errno EOPNOTSUPP = 45;    // Operation not supported on transport endpoint
+const Errno ENOTEMPTY = 66;     // Directory not empty
 
 $case WIN32:
 const Errno EDEADLK = 36;       // Resource deadlock would occur Win32
@@ -439,6 +440,7 @@ const Errno ECONNRESET = 108;   // Connection reset by peer
 const Errno ENETUNREACH = 118;  // Network is unreachable
 const Errno ENETRESET = 117;    // Network dropped connection because of reset
 const Errno EOPNOTSUPP = 130;   // Operation not supported on transport endpoint
+const Errno ENOTEMPTY = 41;     // Directory not empty
 
 $default:
 const Errno EDEADLK = 35;       // Resource deadlock would occur Linux (others?)
@@ -450,6 +452,7 @@ const Errno ECONNRESET = 104;   // Connection reset by peer
 const Errno ENETUNREACH = 101;  // Network is unreachable
 const Errno ENETRESET = 102;    // Network dropped connection because of reset
 const Errno EOPNOTSUPP = 95;    // Operation not supported on transport endpoint
+const Errno ENOTEMPTY = 39;     // Directory not empty
 
 $endswitch
 
@@ -458,7 +461,6 @@ $endswitch
 /*
 const Errno ENOLCK = 37;  /* No record locks available */
 const Errno ENOSYS = 38;  /* Function not implemented */
-const Errno ENOTEMPTY = 39;  /* Directory not empty */
 
 const Errno ENOMSG = 42;  /* No message of desired type */
 const Errno EIDRM = 43;  /* Identifier removed */

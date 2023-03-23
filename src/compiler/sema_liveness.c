@@ -37,7 +37,7 @@ static void sema_trace_stmt_chain_liveness(AstId astid)
 			case AST_RETURN_STMT:
 			case AST_BREAK_STMT:
 			case AST_CONTINUE_STMT:
-			case AST_NEXT_STMT:
+			case AST_NEXTCASE_STMT:
 				return;
 			default:
 				break;
@@ -84,6 +84,7 @@ static void sema_trace_stmt_liveness(Ast *ast)
 		case AST_CT_SWITCH_STMT:
 		case AST_CONTRACT:
 		case AST_FOREACH_STMT:
+		case AST_CONTRACT_FAULT:
 			UNREACHABLE
 		case AST_ASM_STMT:
 			sema_trace_expr_list_liveness(ast->asm_stmt.args);
@@ -163,7 +164,7 @@ static void sema_trace_stmt_liveness(Ast *ast)
 		case AST_DEFAULT_STMT:
 			sema_trace_stmt_liveness(ast->case_stmt.body);
 			return;
-		case AST_NEXT_STMT:
+		case AST_NEXTCASE_STMT:
 			sema_trace_stmt_chain_liveness(ast->nextcase_stmt.defer_id);
 			sema_trace_expr_liveness(ast->nextcase_stmt.switch_expr);
 			return;
@@ -243,7 +244,7 @@ RETRY:
 		case EXPR_CT_CHECKS:
 		case EXPR_CT_EVAL:
 		case EXPR_CT_IDENT:
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANYSWITCH:
 			UNREACHABLE
 		case EXPR_DESIGNATOR:
 			sema_trace_expr_liveness(expr->designator_expr.value);
@@ -440,9 +441,9 @@ RETRY:
 			return;
 		case EXPR_TYPEID:
 			return;
-		case EXPR_VARIANT:
-			sema_trace_exprid_liveness(expr->variant_expr.ptr);
-			sema_trace_exprid_liveness(expr->variant_expr.type_id);
+		case EXPR_ANY:
+			sema_trace_exprid_liveness(expr->any_expr.ptr);
+			sema_trace_exprid_liveness(expr->any_expr.type_id);
 			return;
 	}
 	UNREACHABLE

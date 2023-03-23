@@ -9,23 +9,23 @@ fn void blurb() { io::printn("Blurb");}
 macro int! tester()
 {
 	defer blurb();
-	return Foo.ABC!;
+	return Foo.ABC?;
 }
 fn void! test(int x)
 {
 	io::printfn("test(%d)", x);
-	if (x || (tester()?)) io::printn("Ok1");
+	if (x || (tester()!)) io::printn("Ok1");
 	io::printn("Test next");
-	if (tester()? || x) io::printn("Ok?");
+	if (tester()! || x) io::printn("Ok?");
 	io::printn("Test ok");
 }
 
 fn void! test2(int x)
 {
 	io::printfn("test2(%d)", x);
-	if (x && (tester()?)) io::printn("Ok1");
+	if (x && (tester()!)) io::printn("Ok1");
 	io::printn("Test next");
-	if ((tester()?) && x) io::printn("Ok?");
+	if ((tester()!) && x) io::printn("Ok?");
 	io::printn("Test ok");
 }
 

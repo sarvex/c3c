@@ -8,7 +8,7 @@ fault MyErr
 macro foo(int x)
 {
     if (x) return x;
-    return MyErr.TEST!;
+    return MyErr.TEST?;
 }
 
 extern fn void printf(char*, ...);

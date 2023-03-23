@@ -9,7 +9,7 @@ fault TestErr
 fn int! eventually_succeed()
 {
 	static int i = 0;
-	if (i++ < 3) return TestErr.NOPE!;
+	if (i++ < 3) return TestErr.NOPE?;
 	return i * 3;
 }
 

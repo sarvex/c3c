@@ -336,9 +336,10 @@ RESOLVE_LAMBDA:;
 		{
 			error_exit("'%s::%s' is not a function pointer.", path->module, ident);
 		}
-		if (!type_func_match(panic_fn_type, type_void, 4, type_string, type_string, type_string, type_uint))
+		if (!type_func_match(panic_fn_type, type_void, 5, type_string, type_string, type_string, type_uint,
+		                     type_get_subarray(type_any)))
 		{
-			error_exit("Expected panic function to have the signature fn void(String, String, String, uint).");
+			error_exit("Expected panic function to have the signature fn void(String, String, String, uint, variant[]).");
 		}
 		global_context.panic_var = decl;
 	}

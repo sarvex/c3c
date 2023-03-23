@@ -57,7 +57,7 @@ static inline bool sema_expr_analyse_ct_arg(SemaContext *context, Expr *expr);
 static inline bool sema_expr_analyse_ct_stringify(SemaContext *context, Expr *expr);
 static inline bool sema_expr_analyse_ct_offsetof(SemaContext *context, Expr *expr);
 static inline bool sema_expr_analyse_ct_call(SemaContext *context, Expr *expr);
-static inline bool sema_expr_analyse_variant(SemaContext *context, Expr *expr);
+
 static inline bool sema_expr_analyse_retval(SemaContext *c, Expr *expr);
 static inline bool sema_expr_analyse_expr_list(SemaContext *context, Expr *expr);
 static inline bool sema_expr_analyse_ct_checks(SemaContext *context, Expr *expr);
@@ -186,7 +186,7 @@ static inline bool sema_expr_analyse_enum_constant(Expr *expr, const char *name,
 static inline bool sema_cast_ident_rvalue(SemaContext *context, Expr *expr);
 static inline bool sema_cast_rvalue(SemaContext *context, Expr *expr);
 
-static inline bool sema_expr_analyse_type_access(SemaContext *context, Expr *expr, TypeInfo *parent, bool was_group, Expr *identifier);
+static inline bool sema_expr_analyse_type_access(SemaContext *context, Expr *expr, Type *parent_type, bool was_group, Expr *identifier);
 static inline bool sema_expr_analyse_member_access(SemaContext *context, Expr *expr, Expr *parent, bool was_group, Expr *identifier);
 static inline bool sema_expr_fold_to_member(Expr *expr, Expr *parent, Decl *member);
 
@@ -509,8 +509,8 @@ static bool sema_binary_is_expr_lvalue(Expr *top_expr, Expr *expr)
 		case EXPR_TYPEID:
 		case EXPR_TYPEID_INFO:
 		case EXPR_TYPEINFO:
-		case EXPR_VARIANT:
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANY:
+		case EXPR_ANYSWITCH:
 		case EXPR_VASPLAT:
 		case EXPR_TEST_HOOK:
 			goto ERR;
@@ -698,18 +698,7 @@ static inline bool sema_expr_analyse_ternary(SemaContext *context, Expr *expr)
 	if (left_canonical != right_canonical)
 	{
 		Type *max;
-		if (left_canonical->type_kind == TYPE_OPTIONAL_ANY)
-		{
-			max = right_canonical;
-		}
-		else if (right_canonical->type_kind == TYPE_OPTIONAL_ANY)
-		{
-			max = left_canonical;
-		}
-		else
-		{
-			max = type_find_max_type(type_no_optional(left_canonical), type_no_optional(right_canonical));
-		}
+		max = type_find_max_type(type_no_optional(left_canonical), type_no_optional(right_canonical));
 		if (!max)
 		{
 			SEMA_ERROR(expr, "Cannot find a common parent type of '%s' and '%s'",
@@ -1465,8 +1454,8 @@ static inline bool sema_call_analyse_invocation(SemaContext *context, Expr *call
 				if (IS_OPTIONAL(arg)) *optional = true;
 				if (type_is_invalid_storage_type(arg->type))
 				{
-					SEMA_ERROR(arg, "A value of type %s can only be passed as a compile time parameter.", type_quoted_error_string(arg->type));
-					return false;
+					assert(!type_is_wildcard(arg->type));
+					RETURN_SEMA_ERROR(arg, "A value of type %s can only be passed as a compile time parameter.", type_quoted_error_string(arg->type));
 				}
 				if (!param->alignment)
 				{
@@ -1581,29 +1570,28 @@ static inline Type *context_unify_returns(SemaContext *context)
 	bool all_returns_need_casts = false;
 	Type *common_type = NULL;
 
-	bool optional = false;
-	bool no_return = true;
 	// 1. Loop through the returns.
-	VECEACH(context->returns, i)
+	bool optional = false;
+	unsigned returns = vec_size(context->returns);
+	if (!returns) return type_void;
+	for (unsigned i = 0; i < returns; i++)
 	{
 		Ast *return_stmt = context->returns[i];
+		Type *rtype;
 		if (!return_stmt)
 		{
 			optional = true;
-			continue;
+			rtype = type_wildcard;
 		}
-		no_return = false;
-		Expr *ret_expr = return_stmt->return_stmt.expr;
-		Type *rtype = ret_expr ? ret_expr->type : type_void;
-		if (type_is_optional_any(rtype))
+		else
 		{
-			optional = true;
-			continue;
-		}
-		if (type_is_optional(rtype))
-		{
-			optional = true;
-			rtype = type_no_optional(rtype);
+			Expr *ret_expr = return_stmt->return_stmt.expr;
+			rtype = ret_expr ? ret_expr->type : type_void;
+			if (type_is_optional(rtype))
+			{
+				optional = true;
+				rtype = type_no_optional(rtype);
+			}
 		}
 		// 2. If we have no common type, set to the return type.
 		if (!common_type)
@@ -1634,24 +1622,12 @@ static inline Type *context_unify_returns(SemaContext *context)
 		all_returns_need_casts = true;
 	}
 
-	// If we have no return (or only anyfail)
-	if (!common_type)
-	{
-		assert(!all_returns_need_casts && "We should never need casts here.");
-		// An optional?
-		if (optional)
-		{
-			// If there are only implicit returns, then we assume void!, otherwise it's an "anyfail"
-			return no_return ? type_get_optional(type_void) : type_anyfail;
-		}
-		// No optional => void.
-		return type_void;
-	}
+	assert(common_type);
 
 	// 7. Insert casts.
 	if (all_returns_need_casts)
 	{
-		assert(!type_is_optional_type(common_type));
+		assert(common_type != type_wildcard);
 		VECEACH(context->returns, i)
 		{
 			Ast *return_stmt = context->returns[i];
@@ -2796,25 +2772,25 @@ static inline void sema_expr_replace_with_enum_name_array(Expr *enum_array_expr,
 	enum_array_expr->resolve_status = RESOLVE_NOT_DONE;
 }
 
-static inline bool sema_expr_analyse_type_access(SemaContext *context, Expr *expr, TypeInfo *parent, bool was_group, Expr *identifier)
+static inline bool sema_expr_analyse_type_access(SemaContext *context, Expr *expr, Type *parent_type, bool was_group, Expr *identifier)
 {
 	assert(identifier->expr_kind == EXPR_IDENTIFIER);
 
-	Type *canonical = parent->type->canonical;
+	Type *canonical = parent_type->canonical;
 	const char *name = identifier->identifier_expr.ident;
 	bool is_const = identifier->identifier_expr.is_const;
 
 	if (!is_const)
 	{
 		AlignSize align;
-		if (!sema_set_abi_alignment(context, parent->type, &align)) return false;
+		if (!sema_set_abi_alignment(context, parent_type, &align)) return false;
 		if (sema_expr_rewrite_to_type_property(context, expr, canonical, type_property_by_name(name),
 		                                       align, 0)) return true;
 	}
 
 	if (!type_may_have_sub_elements(canonical))
 	{
-		SEMA_ERROR(expr, "'%s' does not have a property '%s'.", type_to_error_string(parent->type), name);
+		SEMA_ERROR(expr, "'%s' does not have a property '%s'.", type_to_error_string(parent_type), name);
 		return false;
 	}
 	Decl *decl = canonical->decl;
@@ -2957,6 +2933,7 @@ static inline bool sema_expr_analyse_member_access(SemaContext *context, Expr *e
 		case TYPE_PROPERTY_INNER:
 		case TYPE_PROPERTY_NAMES:
 		case TYPE_PROPERTY_VALUES:
+		case TYPE_PROPERTY_ASSOCIATED:
 			break;
 	}
 
@@ -3035,7 +3012,6 @@ static inline bool sema_create_const_len(SemaContext *context, Expr *expr, Type 
 		case TYPE_FAULTTYPE:
 			len = vec_size(type->decl->enums.values);
 			break;
-		case TYPE_SCALED_VECTOR:
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_FLEXIBLE_ARRAY:
 		case TYPE_SUBARRAY:
@@ -3071,7 +3047,6 @@ static inline bool sema_create_const_inner(SemaContext *context, Expr *expr, Typ
 		case TYPE_SUBARRAY:
 		case TYPE_INFERRED_ARRAY:
 		case TYPE_INFERRED_VECTOR:
-		case TYPE_SCALED_VECTOR:
 		case TYPE_VECTOR:
 			inner = type->array.base;
 			break;
@@ -3146,8 +3121,7 @@ static inline bool sema_create_const_min(SemaContext *context, Expr *expr, Type 
 
 static inline bool sema_create_const_params(SemaContext *context, Expr *expr, Type *type)
 {
-	if (type->type_kind != TYPE_POINTER || type->pointer->type_kind != TYPE_FUNC) return false;
-	type = type->pointer;
+	if (type->type_kind != TYPE_FUNC) return false;
 	Signature *sig = type->function.signature;
 	unsigned params = vec_size(sig->params);
 	Expr **param_exprs = params ? VECNEW(Expr*, params) : NULL;
@@ -3158,6 +3132,22 @@ static inline bool sema_create_const_params(SemaContext *context, Expr *expr, Ty
 		vec_add(param_exprs, expr_element);
 	}
 	expr_rewrite_const_untyped_list(expr, param_exprs);
+	return true;
+}
+
+static inline bool sema_create_const_associated(SemaContext *context, Expr *expr, Type *type)
+{
+	if (type->type_kind != TYPE_ENUM) return false;
+	Decl **associated = type->decl->enums.parameters;
+	unsigned count = vec_size(associated);
+	Expr **associated_exprs = count ? VECNEW(Expr*, count) : NULL;
+	for (unsigned i = 0; i < count; i++)
+	{
+		Decl *decl = associated[i];
+		Expr *expr_element = expr_new_const_typeid(expr->span, decl->type->canonical);
+		vec_add(associated_exprs, expr_element);
+	}
+	expr_rewrite_const_untyped_list(expr, associated_exprs);
 	return true;
 }
 
@@ -3316,6 +3306,7 @@ static bool sema_expr_rewrite_to_typeid_property(SemaContext *context, Expr *exp
 		case TYPE_PROPERTY_EXTNAMEOF:
 		case TYPE_PROPERTY_NAMEOF:
 		case TYPE_PROPERTY_QNAMEOF:
+		case TYPE_PROPERTY_ASSOCIATED:
 			// Not supported by dynamic typeid
 		case TYPE_PROPERTY_NONE:
 			return false;
@@ -3411,6 +3402,8 @@ static bool sema_expr_rewrite_to_type_property(SemaContext *context, Expr *expr,
 			if (!type_kind_is_enumlike(flat->type_kind)) return false;
 			sema_expr_replace_with_enum_name_array(expr, flat->decl);
 			return sema_analyse_expr(context, expr);
+		case TYPE_PROPERTY_ASSOCIATED:
+			return sema_create_const_associated(context, expr, flat);
 		case TYPE_PROPERTY_ELEMENTS:
 			if (!type_kind_is_enumlike(flat->type_kind)) return false;
 			expr_rewrite_const_int(expr, type_isz, vec_size(flat->decl->enums.values));
@@ -3431,10 +3424,11 @@ static bool sema_expr_rewrite_to_type_property(SemaContext *context, Expr *expr,
 			sema_create_const_membersof(context, expr, flat, alignment, offset);
 			return true;
 		case TYPE_PROPERTY_PARAMS:
+			if (flat->type_kind == TYPE_POINTER && flat->pointer->type_kind == TYPE_FUNC) flat = flat->pointer;
 			return sema_create_const_params(context, expr, flat);
 		case TYPE_PROPERTY_RETURNS:
-			if (flat->type_kind != TYPE_POINTER || flat->pointer->type_kind != TYPE_FUNC) return false;
-			flat = flat->pointer;
+			if (flat->type_kind == TYPE_POINTER && flat->pointer->type_kind == TYPE_FUNC) flat = flat->pointer;
+			if (flat->type_kind != TYPE_FUNC) return false;
 			expr_rewrite_const_typeid(expr, type_infoptr(flat->function.signature->rtype)->type);
 			return true;
 		case TYPE_PROPERTY_SIZEOF:
@@ -3519,7 +3513,15 @@ static inline bool sema_expr_analyse_access(SemaContext *context, Expr *expr)
 			SEMA_ERROR(child, "A type can't appear here.");
 			return false;
 		}
-
+		if (parent->expr_kind == EXPR_IDENTIFIER && parent->type->type_kind == TYPE_FUNC)
+		{
+			expr->type = type_typeid;
+			expr->expr_kind = EXPR_CONST;
+			expr->const_expr.const_kind = CONST_TYPEID;
+			expr->const_expr.typeid = parent->type;
+			expr->resolve_status = RESOLVE_DONE;
+			return true;
+		}
 		if (parent->expr_kind == EXPR_TYPEINFO)
 		{
 			expr->type = type_typeid;
@@ -3550,7 +3552,11 @@ static inline bool sema_expr_analyse_access(SemaContext *context, Expr *expr)
 	// 2. If our left-hand side is a type, e.g. MyInt.abc, handle this here.
 	if (parent->expr_kind == EXPR_TYPEINFO)
 	{
-		return sema_expr_analyse_type_access(context, expr, parent->type_expr, was_group, identifier);
+		return sema_expr_analyse_type_access(context, expr, parent->type_expr->type, was_group, identifier);
+	}
+	if (parent->expr_kind == EXPR_IDENTIFIER && parent->type->type_kind == TYPE_FUNC)
+	{
+		return sema_expr_analyse_type_access(context, expr, parent->type, was_group, identifier);
 	}
 	if (expr_is_const_member(parent))
 	{
@@ -3616,7 +3622,6 @@ CHECK_DEEPER:
 	{
 		if (sema_expr_rewrite_to_typeid_property(context, expr, parent, kw)) return true;
 	}
-
 	if (flat_type->type_kind == TYPE_VECTOR)
 	{
 		unsigned len = strlen(kw);
@@ -5036,9 +5041,9 @@ static bool sema_expr_analyse_shift(SemaContext *context, Expr *expr, Expr *left
 		//     the left hand side. We ignore this check for lhs being a constant.
 		Type *left_type_no_fail = type_no_optional(left->type)->canonical;
 		assert(type_kind_is_any_integer(left_type_no_fail->type_kind));
-		if (int_ucomp(right->const_expr.ixx, left_type_no_fail->builtin.bitsize, BINARYOP_GT))
+		if (int_ucomp(right->const_expr.ixx, left_type_no_fail->builtin.bitsize, BINARYOP_GE))
 		{
-			SEMA_ERROR(right, "The shift exceeds bitsize of %s.", type_quoted_error_string(type_no_optional(left->type)));
+			SEMA_ERROR(right, "The shift is not less than the bitsize of %s.", type_quoted_error_string(type_no_optional(left->type)));
 			return false;
 		}
 
@@ -5636,9 +5641,6 @@ static inline bool sema_expr_analyse_not(SemaContext *context, Expr *expr)
 			case TYPE_VECTOR:
 				expr->type = type_get_vector(type_bool, canonical->array.len);
 				return true;
-			case TYPE_SCALED_VECTOR:
-				expr->type = type_get_scaled_vector(type_bool);
-				return true;
 			case TYPE_INFERRED_VECTOR:
 				UNREACHABLE;
 			default:
@@ -5840,23 +5842,7 @@ static inline bool sema_expr_analyse_or_error(SemaContext *context, Expr *expr)
 	// Here we might need to insert casts.
 	Type *else_type = rhs->type;
 
-	if (type_is_optional_any(type))
-	{
-		// One possibility is that both sides have the "optional any" type
-		// if so then we're done.
-		if (else_type == type)
-		{
-			expr->type = type;
-			return true;
-		}
-		// Otherwise assign the type of "else":
-		type = else_type;
-	}
-	else if (type_is_optional_any(else_type))
-	{
-		expr->type = type;
-		return true;
-	}
+
 	// Remove any possible optional of the else type.
 	bool add_optional = type_is_optional(else_type);
 	type = type_no_optional(type);
@@ -6020,19 +6006,14 @@ static inline bool sema_expr_analyse_rethrow(SemaContext *context, Expr *expr)
 		return false;
 	}
 	expr->rethrow_expr.cleanup = context_get_defers(context, context->active_scope.defer_last, 0, false);
-	if (inner->type == type_anyfail)
-	{
-		SEMA_ERROR(expr, "This expression will always throw, which isn't allowed.");
-		return false;
-	}
+
 	expr->type = type_no_optional(inner->type);
 
 	if (!IS_OPTIONAL(inner))
 	{
-		SEMA_ERROR(expr, "No optional to rethrow before '?' in the expression, please remove '?'.");
+		SEMA_ERROR(expr, "No optional to rethrow before '!' in the expression, please remove '!'.");
 		return false;
 	}
-
 
 	if (context->active_scope.flags & (SCOPE_EXPR_BLOCK | SCOPE_MACRO))
 	{
@@ -6042,7 +6023,7 @@ static inline bool sema_expr_analyse_rethrow(SemaContext *context, Expr *expr)
 	{
 		if (context->rtype && context->rtype->type_kind != TYPE_OPTIONAL)
 		{
-			SEMA_ERROR(expr, "This expression implicitly returns with an optional result, but the function does not allow optional results. Did you mean to use 'else' instead?");
+			SEMA_ERROR(expr, "This expression implicitly returns with an optional result, but the function does not allow optional results. Did you mean to use '!!' instead?");
 			return false;
 		}
 	}
@@ -6055,11 +6036,6 @@ static inline bool sema_expr_analyse_force_unwrap(SemaContext *context, Expr *ex
 {
 	Expr *inner = expr->inner_expr;
 	if (!sema_analyse_expr(context, inner)) return false;
-	if (inner->type == type_anyfail)
-	{
-		SEMA_ERROR(expr, "This expression will always throw, which isn't allowed.");
-		return false;
-	}
 	expr->type = type_no_optional(inner->type);
 	if (!IS_OPTIONAL(inner))
 	{
@@ -6123,7 +6099,8 @@ static inline bool sema_expr_analyse_expr_block(SemaContext *context, Type *infe
 			success = false;
 			goto EXIT;
 		}
-		if (type_no_optional(sum_returns) != type_void && !context->active_scope.jump_end)
+		Type *return_no_optional = type_no_optional(sum_returns);
+		if (return_no_optional != type_wildcard && return_no_optional != type_void && !context->active_scope.jump_end)
 		{
 			Ast *ast = ast_last(astptr(expr->expr_block.first_stmt));
 			SEMA_ERROR(ast, "Expected a return statement following this statement.");
@@ -6170,7 +6147,7 @@ static inline bool sema_expr_analyse_optional(SemaContext *context, Expr *expr)
 		SEMA_ERROR(inner, "You cannot use the '!' operator on expressions of type %s", type_quoted_error_string(type));
 		return false;
 	}
-	expr->type = type_anyfail;
+	expr->type = type_wildcard_optional;
 	return true;
 }
 
@@ -6677,13 +6654,6 @@ RETRY:
 			if (!type_ok(type)) return type;
 			return type_get_inferred_vector(type);
 		}
-		case TYPE_INFO_SCALED_VECTOR:
-		{
-			Type *type = sema_expr_check_type_exists(context, type_info->array.base);
-			if (!type) return NULL;
-			if (!type_ok(type)) return type;
-			return type_get_scaled_vector(type);
-		}
 		case TYPE_INFO_POINTER:
 		{
 			// If it's an array, make sure we can resolve the length
@@ -6939,26 +6909,6 @@ RETRY:
 
 NOT_DEFINED:
 	expr_rewrite_const_bool(expr, type_bool, false);
-	return true;
-}
-
-static inline bool sema_expr_analyse_variant(SemaContext *context, Expr *expr)
-{
-	Expr *ptr = exprptr(expr->variant_expr.ptr);
-	Expr *typeid = exprptr(expr->variant_expr.type_id);
-	if (!sema_analyse_expr(context, ptr)) return false;
-	if (!sema_analyse_expr(context, typeid)) return false;
-	if (!type_is_pointer(ptr->type))
-	{
-		SEMA_ERROR(ptr, "This must be a pointer, but is %s.", type_quoted_error_string(ptr->type));
-		return false;
-	}
-	if (typeid->type != type_typeid)
-	{
-		SEMA_ERROR(ptr, "This must of type 'typeid', but was %s.", type_quoted_error_string(ptr->type));
-		return false;
-	}
-	expr->type = type_any;
 	return true;
 }
 
@@ -7233,7 +7183,7 @@ static inline bool sema_analyse_expr_dispatch(SemaContext *context, Expr *expr)
 		case EXPR_TRY_UNWRAP_CHAIN:
 		case EXPR_TRY_UNWRAP:
 		case EXPR_CATCH_UNWRAP:
-		case EXPR_VARIANTSWITCH:
+		case EXPR_ANYSWITCH:
 		case EXPR_TYPEID_INFO:
 		case EXPR_ASM:
 		case EXPR_OPERATOR_CHARS:
@@ -7249,8 +7199,9 @@ static inline bool sema_analyse_expr_dispatch(SemaContext *context, Expr *expr)
 			return sema_expr_analyse_ct_checks(context, expr);
 		case EXPR_CT_ARG:
 			return sema_expr_analyse_ct_arg(context, expr);
-		case EXPR_VARIANT:
-			return sema_expr_analyse_variant(context, expr);
+		case EXPR_ANY:
+			// Created from compound statement.
+			UNREACHABLE;
 		case EXPR_STRINGIFY:
 			if (!sema_expr_analyse_ct_stringify(context, expr)) return false;
 			return true;
@@ -7362,7 +7313,7 @@ bool sema_analyse_cond_expr(SemaContext *context, Expr *expr)
 
 bool sema_analyse_expr_rhs(SemaContext *context, Type *to, Expr *expr, bool allow_optional)
 {
-	if (to && type_is_optional_type(to))
+	if (to && type_is_optional(to))
 	{
 		to = to->optional;
 		assert(allow_optional);

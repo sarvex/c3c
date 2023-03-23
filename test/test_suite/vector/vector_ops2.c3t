@@ -29,6 +29,8 @@ entry:
   %y = alloca <4 x float>, align 16
   %z = alloca <4 x float>, align 16
   %w = alloca <4 x float>, align 16
+  %varargslots = alloca [0 x %variant], align 8
+  %indirectarg = alloca %"variant[]", align 8
   store <4 x float> <float 1.000000e+00, float 2.000000e+00, float 3.000000e+00, float 4.000000e+00>, ptr %y, align 16
   store <4 x float> <float 2.000000e+00, float 2.000000e+00, float 2.000000e+00, float -1.000000e+02>, ptr %z, align 16
   %0 = load <4 x float>, ptr %y, align 16
@@ -43,8 +45,11 @@ entry:
   br i1 %zero, label %panic, label %checkok
 
 panic:                                            ; preds = %entry
-  %6 = load ptr, ptr @std.core.builtin.panic, align 8
-  call void %6(ptr @.panic_msg, i64 17, ptr @.file, i64 14, ptr @.func, i64 5, i32 9)
+  %6 = insertvalue %"variant[]" undef, ptr %varargslots, 0
+  %7 = insertvalue %"variant[]" %6, i64 0, 1
+  store %"variant[]" %7, ptr %indirectarg, align 8
+  %8 = load ptr, ptr @std.core.builtin.panic, align 8
+  call void %8(ptr @.panic_msg, i64 17, ptr @.file, i64 14, ptr @.func, i64 5, i32 9, ptr byval(%"variant[]") align 8 %indirectarg)
   br label %checkok
 
 checkok:                                          ; preds = %panic, %entry

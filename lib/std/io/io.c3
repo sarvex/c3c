@@ -25,6 +25,7 @@ fault IoError
     FILE_IS_PIPE,
     FILE_EOF,
     INCOMPLETE_WRITE,
+    BUSY,
     NO_PERMISSION,
     OUT_OF_SPACE,
     INVALID_PUSHBACK,
@@ -39,6 +40,7 @@ fault IoError
     NOT_SEEKABLE,
     NAME_TOO_LONG,
     WOULD_BLOCK,
+    DIR_NOT_EMPTY,
     INTERRUPTED,
     GENERAL_ERROR,
     UNKNOWN_ERROR,
@@ -60,8 +62,6 @@ macro void print(x)
 		catch? stdout().print(x.as_str());
 	$case DString:
 		catch? stdout().print(x.str());
-	$case VarString:
-		catch? stdout().print(x.str());
 	$default:
 		$if (@convertible(x, String))
 			catch? stdout().print((String)x);
@@ -81,8 +81,6 @@ macro void printn(x = "")
 		catch? stdout().printn(x.as_str());
 	$case DString:
 		catch? stdout().printn(x.str());
-	$case VarString:
-		catch? stdout().printn(x.str());
 	$default:
 		$if (@convertible(x, String))
 			catch? stdout().printn((String)x);
@@ -91,8 +89,6 @@ macro void printn(x = "")
 		$endif
 	$endswitch
 }
-
-macro void println(x = "") @deprecated => printn(x);
 
 fn File stdout()
 {

@@ -6,7 +6,7 @@ fn int! xy()
 }
 macro int! foo()
 {
-	xy()?;
+	xy()!;
 	return 1;
 }
 fn void main()

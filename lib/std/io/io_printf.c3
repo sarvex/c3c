@@ -33,30 +33,12 @@ fn usz! printf(String format, args...) @maydiscard
     return formatter.vprintf(format, args);
 }
 
-define printfln = printfn;
-
 fn usz! printfn(String format, args...) @maydiscard
 {
 	Formatter formatter;
 	formatter.init(&out_putchar_fn);
-    usz len = formatter.vprintf(format, args)?;
+    usz len = formatter.vprintf(format, args)!;
 	putchar('\n');
-	return len + 1;
-}
-
-fn usz! VarString.printf(VarString* str, String format, args...) @maydiscard
-{
-	Formatter formatter;
-	formatter.init(&out_string_append_fn, str);
-	return formatter.vprintf(format, args);
-}
-
-fn usz! VarString.printfn(VarString* str, String format, args...) @maydiscard
-{
-	Formatter formatter;
-	formatter.init(&out_string_append_fn, str);
-	usz len = formatter.vprintf(format, args)?;
-	str.append('\n');
 	return len + 1;
 }
 
@@ -65,7 +47,7 @@ fn char[]! bprintf(char[] buffer, String format, args...) @maydiscard
 	Formatter formatter;
 	BufferData data = { .buffer = buffer };
     formatter.init(&out_buffer_fn, &data);
-    usz size = formatter.vprintf(format, args)?;
+    usz size = formatter.vprintf(format, args)!;
     return buffer[:data.written];
 }
 
@@ -73,15 +55,15 @@ fn usz! File.printf(File file, String format, args...) @maydiscard
 {
 	Formatter formatter;
     formatter.init(&out_fputchar_fn, &file);
-    return formatter.vprintf(format, args)?;
+    return formatter.vprintf(format, args)!;
 }
 
 fn usz! File.printfn(File file, String format, args...) @maydiscard
 {
 	Formatter formatter;
     formatter.init(&out_fputchar_fn, &file);
-    usz len = formatter.vprintf(format, args)?;
-	file.putc('\n')?;
+    usz len = formatter.vprintf(format, args)!;
+	file.putc('\n')!;
 	file.flush();
 	return len + 1;
 }
@@ -157,7 +139,7 @@ static initialize @priority(101)
 
 fn void! Formatter.out(Formatter* this, char c) @private
 {
-	this.out_fn(c, this.data)?;
+	this.out_fn(c, this.data)!;
 }
 
 macro bool! Formatter.print_with_function(Formatter* this, variant arg)
@@ -173,7 +155,7 @@ macro bool! Formatter.print_with_function(Formatter* this, variant arg)
 			this.width = old_width;
 			this.prec = old_prec;
 		}
-		to_format(arg.ptr, this)?;
+		to_format(arg.ptr, this)!;
 		return true;
     }
     if (try to_string = tostring_functions.get(arg.type))
@@ -189,7 +171,7 @@ macro bool! Formatter.print_with_function(Formatter* this, variant arg)
 		}
 		@pool()
 		{
-			this.out_substr(to_string(arg.ptr, mem::temp()))?;
+			this.out_substr(to_string(arg.ptr, mem::temp()))!;
 			return true;
 		};
     }
@@ -201,7 +183,7 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 	switch (arg.type.kindof)
 	{
 		case TYPEID:
-			return this.out_substr("<typeid>");
+			return this.out_substr("typeid");
 		case VOID:
         	return this.out_substr("void");
 		case ANYERR:
@@ -210,35 +192,31 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 		case VARIANT:
 			return this.out_str(*(variant*)arg);
 		case ENUM:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
         	return this.out_substr(arg.type.names[types::variant_to_int(arg, usz)!!]);
 		case STRUCT:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.out_substr("<struct>");
 		case UNION:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.out_substr("<union>");
 		case BITSTRUCT:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.out_substr("<bitstruct>");
 		case FUNC:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.out_substr("<function>");
 		case OPTIONAL:
 			unreachable();
 		case DISTINCT:
-			if (this.print_with_function(arg)?) return;
-			if (arg.type == VarString.typeid)
-			{
-				return this.out_substr(((VarString*)arg).str());
-			}
+			if (this.print_with_function(arg)!) return;
 			if (arg.type == DString.typeid)
 			{
 				return this.out_substr(((DString*)arg).str());
 			}
         	return this.out_str(variant { arg.ptr, arg.type.inner });
 		case POINTER:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.ntoa_variant(arg, 16);
 		case SIGNED_INT:
 		case UNSIGNED_INT:
@@ -246,39 +224,39 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 		case FLOAT:
 			return this.ftoa(float_from_variant(arg)!!);
 		case ARRAY:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			// this is SomeType[*] so grab the "SomeType"
 			typeid inner = arg.type.inner;
 			usz size = inner.sizeof;
 			usz len = arg.type.len;
 			// Pretend this is a String
 			void* ptr = (void*)arg.ptr;
-			this.out('[')?;
+			this.out('[')!;
 			for (usz i = 0; i < len; i++)
 			{
-				if (i != 0) this.out_substr(", ")?;
-				this.out_str(variant { ptr, inner })?;
+				if (i != 0) this.out_substr(", ")!;
+				this.out_str(variant { ptr, inner })!;
 				ptr += size;
 			}
 			return this.out(']');
 		case VECTOR:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			// this is SomeType[*] so grab the "SomeType"
 			typeid inner = arg.type.inner;
 			usz size = inner.sizeof;
 			usz len = arg.type.len;
 			// Pretend this is a String
 			void* ptr = (void*)arg.ptr;
-			this.out_substr("[<")?;
+			this.out_substr("[<")!;
 			for (usz i = 0; i < len; i++)
 			{
-				if (i != 0) this.out_substr(", ")?;
-				this.out_str(variant { ptr, inner })?;
+				if (i != 0) this.out_substr(", ")!;
+				this.out_str(variant { ptr, inner })!;
 				ptr += size;
 			}
 			return this.out_substr(">]");
 		case SUBARRAY:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			// this is SomeType[] so grab the "SomeType"
 			typeid inner = arg.type.inner;
 			if (inner == char.typeid)
@@ -290,14 +268,14 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 			String* temp = (void*)arg.ptr;
 			void* ptr = (void*)temp.ptr;
 			usz len = temp.len;
-			this.out('[')?;
+			this.out('[')!;
 			for (usz i = 0; i < len; i++)
 			{
-				if (i != 0) this.out_substr(", ")?;
-				this.out_str(variant { ptr, inner })?;
+				if (i != 0) this.out_substr(", ")!;
+				this.out_str(variant { ptr, inner })!;
 				ptr += size;
 			}
-			this.out(']')?;
+			this.out(']')!;
 		case BOOL:
 			if (*(bool*)arg.ptr)
 			{
@@ -308,7 +286,7 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 				return this.out_substr("false");
 			}
 		default:
-			if (this.print_with_function(arg)?) return;
+			if (this.print_with_function(arg)!) return;
 			return this.out_substr("Invalid type");
 	}
 }
@@ -318,7 +296,7 @@ fn void! Formatter.out_str(Formatter* this, variant arg) @private
 fn void! out_buffer_fn(char c, void *data) @private
 {
 	BufferData *buffer_data = data;
-	if (buffer_data.written >= buffer_data.buffer.len) return PrintFault.BUFFER_EXCEEDED!;
+	if (buffer_data.written >= buffer_data.buffer.len) return PrintFault.BUFFER_EXCEEDED?;
 	buffer_data.buffer[buffer_data.written++] = c;
 }
 
@@ -334,15 +312,8 @@ fn void! out_putchar_fn(char c, void* data @unused) @private
 fn void! out_fputchar_fn(char c, void* data) @private
 {
 	File* f = data;
-	f.putc(c)?;
+	f.putc(c)!;
 }
-
-fn void! out_string_append_fn(char c, void* data) @private
-{
-	VarString* s = data;
-	s.append_char(c);
-}
-
 
 struct BufferData @private
 {
@@ -367,15 +338,15 @@ fn usz! Formatter.vprintf(Formatter* this, String format, variant[] variants)
 		if (c != '%')
 		{
 			// no
-			this.out(c)?;
+			this.out(c)!;
 			continue;
 		}
 		i++;
-		if (i >= format_len) return PrintFault.INVALID_FORMAT_STRING!;
+		if (i >= format_len) return PrintFault.INVALID_FORMAT_STRING?;
 		c = format[i];
 		if (c == '%')
 		{
-			this.out(c)?;
+			this.out(c)!;
 			continue;
 		}
 		// evaluate flags
@@ -391,11 +362,11 @@ fn usz! Formatter.vprintf(Formatter* this, String format, variant[] variants)
 				case '#': this.flags.hash = true;
 				default: break FLAG_EVAL;
 			}
-			if (++i >= format_len) return PrintFault.INVALID_FORMAT_STRING!;
+			if (++i >= format_len) return PrintFault.INVALID_FORMAT_STRING?;
 			c = format[i];
 		}
 		// evaluate width field
-		int w = printf_parse_format_field(variants.ptr, variants.len, &variant_index, format.ptr, format.len, &i)?;
+		int w = printf_parse_format_field(variants.ptr, variants.len, &variant_index, format.ptr, format.len, &i)!;
 		c = format[i];
 		if (w < 0)
 		{
@@ -408,15 +379,15 @@ fn usz! Formatter.vprintf(Formatter* this, String format, variant[] variants)
 		if (c == '.')
 		{
 			this.flags.precision = true;
-			if (++i >= format_len) return PrintFault.INVALID_FORMAT_STRING!;
-			int prec = printf_parse_format_field(variants.ptr, variants.len, &variant_index, format.ptr, format.len, &i)?;
+			if (++i >= format_len) return PrintFault.INVALID_FORMAT_STRING?;
+			int prec = printf_parse_format_field(variants.ptr, variants.len, &variant_index, format.ptr, format.len, &i)!;
 			this.prec = prec < 0 ? 0 : prec;
 			c = format[i];
 		}
 
 		// evaluate specifier
 		uint base = 0;
-		if (variant_index >= variants.len) return PrintFault.MISSING_ARG!;
+		if (variant_index >= variants.len) return PrintFault.MISSING_ARG?;
 		variant current = variants[variant_index++];
 		switch (c)
 		{
@@ -442,38 +413,38 @@ fn usz! Formatter.vprintf(Formatter* this, String format, variant[] variants)
 				this.flags.uppercase = true;
 				nextcase;
 			case 'a':
-				this.atoa(float_from_variant(current)!!)?;
+				this.atoa(float_from_variant(current)!!)!;
 				continue;
 		    case 'F' :
 		        this.flags.uppercase = true;
 		        nextcase;
 		    case 'f':
-		        this.ftoa(float_from_variant(current)!!)?;
+		        this.ftoa(float_from_variant(current)!!)!;
 				continue;
 			case 'E':
 		        this.flags.uppercase = true;
 		        nextcase;
             case 'e':
-                this.etoa(float_from_variant(current)!!)?;
+                this.etoa(float_from_variant(current)!!)!;
 				continue;
 			case 'G':
 				this.flags.uppercase = true;
 				nextcase;
 			case 'g':
-				this.gtoa(float_from_variant(current)!!)?;
+				this.gtoa(float_from_variant(current)!!)!;
 				continue;
 			case 'c':
-				this.out_char(current)?;
+				this.out_char(current)!;
 				continue;
 			case 's':
-				this.out_str(current)?;
+				this.out_str(current)!;
 				continue;
 			case 'p':
 				this.flags.zeropad = true;
 				this.flags.hash = true;
 				base = 16;
 			default:
-				return PrintFault.INVALID_FORMAT_STRING!;
+				return PrintFault.INVALID_FORMAT_STRING?;
 		}
 		if (base != 10)
 		{
@@ -486,7 +457,7 @@ fn usz! Formatter.vprintf(Formatter* this, String format, variant[] variants)
 		bool is_neg;
 		uint128 v = int_from_variant(current, &is_neg)!!;
 
-		this.ntoa(v, is_neg, base)?;
+		this.ntoa(v, is_neg, base)!;
 	}
 	// termination
 	//	out((char)0, buffer, idx < maxlen ? idx : maxlen - 1U, maxlen);

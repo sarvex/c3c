@@ -44,7 +44,7 @@ const S_IFSOCK = 0o140000; // socket
 fn usz! native_file_size(String path)
 {
 	Darwin64Stat stat;
-	read_stat(&stat, path)?;
+	read_stat(&stat, path)!;
 	return stat.st_size;
 }
 
@@ -76,25 +76,25 @@ fn void! read_stat(Darwin64Stat* stat, String path) @local
 			switch (libc::errno())
 			{
 				case errno::EBADF:
-					return IoError.FILE_NOT_VALID!;
+					return IoError.FILE_NOT_VALID?;
 				case errno::EFAULT:
 					unreachable("Invalid stat");
 				case errno::EIO:
-					return IoError.GENERAL_ERROR!;
+					return IoError.GENERAL_ERROR?;
 				case errno::EACCES:
-					return IoError.NO_PERMISSION!;
+					return IoError.NO_PERMISSION?;
 				case errno::ELOOP:
-					return IoError.NO_PERMISSION!;
+					return IoError.NO_PERMISSION?;
 				case errno::ENAMETOOLONG:
-					return IoError.NAME_TOO_LONG!;
+					return IoError.NAME_TOO_LONG?;
 				case errno::ENOENT:
-					return IoError.FILE_NOT_FOUND!;
+					return IoError.FILE_NOT_FOUND?;
 				case errno::ENOTDIR:
-					return IoError.FILE_NOT_DIR!;
+					return IoError.FILE_NOT_DIR?;
 				case errno::EOVERFLOW:
-					return IoError.GENERAL_ERROR!;
+					return IoError.GENERAL_ERROR?;
 				default:
-					return IoError.UNKNOWN_ERROR!;
+					return IoError.UNKNOWN_ERROR?;
 			}
 		}
 	};

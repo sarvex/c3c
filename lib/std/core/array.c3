@@ -21,7 +21,7 @@ macro index_of(array, element)
 	{
 		if (*e == element) return i;
 	}
-	return SearchResult.MISSING!;
+	return SearchResult.MISSING?;
 }
 
 macro concat(arr1, arr2)
