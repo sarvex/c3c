@@ -94,7 +94,7 @@ for p in vsmanifest["packages"]:
 msvc = {}
 sdk = {}
 
-for pid,p in packages.items():
+for pid in packages:
   if pid.startswith("Microsoft.VisualStudio.Component.VC.".lower()) and pid.endswith(".x86.x64".lower()):
     pver = ".".join(pid.split(".")[4:6])
     if pver[0].isnumeric():
@@ -160,7 +160,7 @@ for arch in archs:
   msvc_packages.append(f"microsoft.vc.{msvc_ver}.crt.{arch}.desktop.base")
   msvc_packages.append(f"microsoft.vc.{msvc_ver}.crt.{arch}.store.base")
   msvc_packages.append(f"microsoft.vc.{msvc_ver}.asan.{arch}.base")
-  
+
 for pkg in msvc_packages:
   p = first(packages[pkg], lambda p: p.get("language") in (None, "en-US"))
   for payload in p["payloads"]:
@@ -175,11 +175,9 @@ for pkg in msvc_packages:
             out.write_bytes(z.read(name))
 
 sdk_packages = [
-  # Windows SDK libs
-  f"Windows SDK for Windows Store Apps Libs-x86_en-us.msi",
-  f"Windows SDK Desktop Libs x64-x86_en-us.msi",
-  # CRT headers & libs
-  f"Universal CRT Headers Libraries and Sources-x86_en-us.msi",
+    "Windows SDK for Windows Store Apps Libs-x86_en-us.msi",
+    "Windows SDK Desktop Libs x64-x86_en-us.msi",
+    "Universal CRT Headers Libraries and Sources-x86_en-us.msi",
 ]
 
 with tempfile.TemporaryDirectory() as d:

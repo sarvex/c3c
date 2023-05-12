@@ -62,7 +62,7 @@ class Issues:
         self.opts = []
 
     def exit_error(self, message):
-        print('Error in file ' + self.sourcefile.filepath + ': ' + message)
+        print(f'Error in file {self.sourcefile.filepath}: {message}')
         exit(-1)
 
     def set_failed(self):
@@ -76,10 +76,10 @@ class Issues:
         elif type == 'Warning':
             map = self.warnings
         else:
-            self.exit_error("Unknown type: " + type)
-        key = file + ":" + line
+            self.exit_error(f"Unknown type: {type}")
+        key = f"{file}:{line}"
         value = map.get(key)
-        if value == None: return False
+        if value is None: return False
         if value in message:
             del map[key]
             return True
@@ -89,40 +89,31 @@ class Issues:
     def parse_result(self, lines):
         for line in lines:
             parts = line.split('|', maxsplit=4)
-            if len(parts) != 4: self.exit_error("Illegal error result: " + line);
+            if len(parts) != 4:
+                self.exit_error(f"Illegal error result: {line}");
             if not self.check_line(parts[0], parts[1], parts[2], parts[3]):
                 self.set_failed()
-                print("Unexpected " + parts[0].lower() + " in " + parts[1] + " line " + parts[2] + ":", end="")
-                print('"' + parts[3] + '"')
+                print(f"Unexpected {parts[0].lower()} in {parts[1]} line {parts[2]}:", end="")
+                print(f'"{parts[3]}"')
         if len(self.errors) > 0:
             self.set_failed()
             print("Expected errors that never occurred:")
-            num = 1
-            for key, value in self.errors.items():
+            for num, (key, value) in enumerate(self.errors.items(), start=1):
                 pos = key.split(":", 2)
-                print(str(num) + ". " + pos[0] + " line: " + pos[1] + " expected: \"" + value + "\"")
-                num += 1
+                print(f"{str(num)}. {pos[0]} line: {pos[1]}" + " expected: \"" + value + "\"")
 
     def compile(self, args):
         os.chdir(TEST_DIR)
-        target = ""
-        debug = ""
-        if (self.arch):
-            target = " --target " + self.arch
-        if (self.debuginfo):
-            debug = "-g "
-        opts = ""
-        for opt in self.opts:
-            opts += ' ' + opt
-        if (self.safe):
-            opts += " --safe"
-        else:
-            opts += " --fast"
+        target = f" --target {self.arch}" if self.arch else ""
+        debug = "-g " if self.debuginfo else ""
+        opts = "".join(f' {opt}' for opt in self.opts) + (
+            " --safe" if self.safe else " --fast"
+        )
         code = subprocess.run(self.conf.compiler + target + ' -O0 ' + opts + ' ' + debug + args, universal_newlines=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         os.chdir(self.conf.cwd)
-        if code.returncode != 0 and code.returncode != 1:
+        if code.returncode not in [0, 1]:
             self.set_failed()
-            print("Error (" + str(code.returncode) + "): " + code.stderr)
+            print(f"Error ({str(code.returncode)}): {code.stderr}")
             self.has_errors = True
             return
         self.parse_result(code.stderr.splitlines(keepends=False))
@@ -139,8 +130,11 @@ class Issues:
             self.line += 1
 
         self.current_file.close()
-        print("- " + str(self.conf.numtests) + "/" + str(self.conf.numtests - self.conf.numsuccess - 1) + " " + self.sourcefile.filepath + ":", end="")
-        self.compile("--test compile " + self.current_file.filepath)
+        print(
+            f"- {str(self.conf.numtests)}/{str(self.conf.numtests - self.conf.numsuccess - 1)} {self.sourcefile.filepath}:",
+            end="",
+        )
+        self.compile(f"--test compile {self.current_file.filepath}")
         if not self.has_errors:
             self.conf.numsuccess += 1
             print(" Passed.")
@@ -174,12 +168,12 @@ class Issues:
             self.files.append(self.current_file)
             return
         else:
-            self.exit_error("unknown header directive " + line)
+            self.exit_error(f"unknown header directive {line}")
 
     def parse_trailing_directive(self, line):
         line = line.split('// #', 2)[1].strip()
         if (line.startswith("warning:")):
-            print("TODO" + line)
+            print(f"TODO{line}")
             exit(-1)
         elif (line.startswith("target:")):
             self.arch = line[7:].strip()
@@ -187,7 +181,7 @@ class Issues:
             line = line[6:].strip()
             self.errors[self.current_file.filename + ":%d" % (self.line + self.current_file.line_offset)] = line
         else:
-            self.exit_error("unknown trailing directive " + line)
+            self.exit_error(f"unknown trailing directive {line}")
 
     def parse_template(self):
         lines = len(self.sourcefile.content)
@@ -209,21 +203,21 @@ class Issues:
             self.current_file.close()
             self.current_file = None
 
-        print("- " + str(self.conf.numtests) + "/" + str(self.conf.numtests - self.conf.numsuccess - 1) + " " + self.sourcefile.filepath + ":", end="")
-        files_to_compile = ""
-        for file in self.files:
-            if file.is_target:
-                files_to_compile += " " + file.filepath
-
-
-        self.compile("--test compile " + files_to_compile)
+        print(
+            f"- {str(self.conf.numtests)}/{str(self.conf.numtests - self.conf.numsuccess - 1)} {self.sourcefile.filepath}:",
+            end="",
+        )
+        files_to_compile = "".join(
+            f" {file.filepath}" for file in self.files if file.is_target
+        )
+        self.compile(f"--test compile {files_to_compile}")
         if self.has_errors: return
 
         for file in self.files:
             if not file.is_target:
                 if not os.path.exists(file.filepath):
                     self.set_failed()
-                    print("Did not compile file " + file.filename)
+                    print(f"Did not compile file {file.filename}")
                     return
                 with open(file.filepath) as reader:
                     lines = reader.read().splitlines()
@@ -262,7 +256,9 @@ class Issues:
         if len(self.sourcefile.content) == 0: self.exit_error("File was empty")
         is_skip = self.sourcefile.content[0].startswith("// #skip")
         if is_skip != self.skip:
-            print("- " + str(self.conf.numtests) + "/" + str(self.conf.numtests - self.conf.numsuccess - 1) + " " + self.sourcefile.filepath + ": *SKIPPED*")
+            print(
+                f"- {str(self.conf.numtests)}/{str(self.conf.numtests - self.conf.numsuccess - 1)} {self.sourcefile.filepath}: *SKIPPED*"
+            )
             self.conf.numskipped += 1
             return
         if is_skip: self.line += 1
@@ -273,7 +269,7 @@ class Issues:
 
 
 def usage():
-    print("Usage: " + sys.argv[0] +  " <compiler path> <file/dir> [-s]")
+    print(f"Usage: {sys.argv[0]} <compiler path> <file/dir> [-s]")
     print('')
     print('Options:')
     print("  -s, --skipped       only run skipped tests")
@@ -299,7 +295,7 @@ def handle_file(filepath, conf):
 
 def handle_dir(filepath, conf):
     for file in os.listdir(filepath):
-        file = filepath + "/" + file
+        file = f"{filepath}/{file}"
         if os.path.isdir(file):
             handle_dir(file, conf)
         elif os.path.isfile(file):
@@ -309,12 +305,12 @@ def main():
     args = len(sys.argv)
     conf = Config()
     if args < 3 or args > 4: usage()
-    conf.compiler = os.getcwd() + "/" + sys.argv[1]
+    conf.compiler = f"{os.getcwd()}/{sys.argv[1]}"
     if not os.path.isfile(conf.compiler):
-        print("Error: Invalid path to compiler: " + conf.compiler)
+        print(f"Error: Invalid path to compiler: {conf.compiler}")
         usage()
     if args == 4:
-        if (sys.argv[3] != '-s' and sys.argv[3] != '--skipped'): usage()
+        if sys.argv[3] not in ['-s', '--skipped']: usage()
         conf.run_skipped = True
     filepath = sys.argv[2]
     if filepath.endswith('/'): filepath = filepath[:-1]
@@ -324,7 +320,7 @@ def main():
     elif os.path.isdir(filepath):
         handle_dir(filepath, conf)
     else:
-        print("Error: Invalid path to tests: " + filepath)
+        print(f"Error: Invalid path to tests: {filepath}")
         usage()
 
     print("Found %d tests: %.1f%% (%d / %d) passed (%d skipped)." % (conf.numtests, 100 * conf.numsuccess / max(1, conf.numtests - conf.numskipped), conf.numsuccess, conf.numtests - conf.numskipped, conf.numskipped))
